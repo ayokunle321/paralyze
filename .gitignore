@@ -1,0 +1,9 @@
+build/
+cmake-build-*/
+*.o
+*.exe
+statik
+.vscode/
+.DS_Store
+*.log
+compile_commands.json
