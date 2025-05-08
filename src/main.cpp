@@ -1,6 +1,23 @@
 #include <iostream>
 #include <string>
-#include <vector>
+#include <memory>
+
+#include "clang/Tooling/Tooling.h"
+#include "clang/Tooling/CommonOptionsParser.h"
+#include "clang/Frontend/FrontendActions.h"
+#include "analyzer/ASTVisitor.h"
+
+using namespace clang;
+using namespace clang::tooling;
+
+// Custom FrontendAction
+class AnalyzerAction : public ASTFrontendAction {
+public:
+    std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance& compiler, 
+                                                   StringRef file) override {
+        return std::make_unique<statik::AnalyzerConsumer>(&compiler.getASTContext());
+    }
+};
 
 void printUsage(const char* progName) {
     std::cout << "Usage: " << progName << " [OPTIONS] <source_file>\n";
@@ -16,48 +33,35 @@ void printVersion() {
 }
 
 int main(int argc, char** argv) {
-    if (argc < 2) {
-        printUsage(argv[0]);
-        return 1;
-    }
-    
-    std::string filename;
-    bool verbose = false;
-    
-    // Parse arguments
+    // Handle help/version before tooling
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
-        
         if (arg == "-h" || arg == "--help") {
             printUsage(argv[0]);
             return 0;
         } else if (arg == "-v" || arg == "--version") {
             printVersion();
             return 0;
-        } else if (arg == "--verbose") {
-            verbose = true;
-        } else if (arg[0] == '-') {
-            std::cout << "Unknown option: " << arg << "\n";
-            return 1;
-        } else {
-            filename = arg;
         }
     }
     
-    if (filename.empty()) {
-        std::cout << "Error: No input file specified\n";
+    if (argc < 2) {
         printUsage(argv[0]);
         return 1;
     }
     
-    if (verbose) {
-        std::cout << "Verbose mode enabled\n";
-    }
-    
+    // Take the last argument as filename
+    std::string filename = argv[argc - 1];
     std::cout << "Analyzing: " << filename << "\n";
     
-    // TODO: actual analysis with LibTooling
-    std::cout << "Analysis complete (placeholder)\n";
+    // Create a simple compilation database
+    std::vector<std::string> sources = {filename};
+    auto tool = newFrontendActionFactory<AnalyzerAction>();
     
-    return 0;
+    // Run the tool
+    ClangTool clangTool(FixedCompilationDatabase(".", {}), sources);
+    int result = clangTool.run(tool.get());
+    
+    std::cout << "Analysis complete\n";
+    return result;
 }
