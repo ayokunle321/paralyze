@@ -3,6 +3,7 @@
 #include "clang/AST/ASTConsumer.h"
 #include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/Frontend/CompilerInstance.h"
+#include "analyzer/LoopInfo.h"
 
 namespace statik {
 
@@ -11,9 +12,13 @@ public:
     explicit AnalyzerVisitor(clang::ASTContext* context) : context_(context) {}
     
     bool VisitFunctionDecl(clang::FunctionDecl* func);
+    bool VisitForStmt(clang::ForStmt* forLoop);
+    
+    void printResults() const;
     
 private:
     clang::ASTContext* context_;
+    std::vector<LoopInfo> loops_;
 };
 
 class AnalyzerConsumer : public clang::ASTConsumer {
@@ -23,6 +28,7 @@ public:
         
     void HandleTranslationUnit(clang::ASTContext& context) override {
         visitor_.TraverseDecl(context.getTranslationUnitDecl());
+        visitor_.printResults();
     }
     
 private:
