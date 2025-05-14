@@ -13,6 +13,8 @@ public:
     
     bool VisitFunctionDecl(clang::FunctionDecl* func);
     bool VisitForStmt(clang::ForStmt* forLoop);
+    bool VisitWhileStmt(clang::WhileStmt* whileLoop);
+    bool VisitDoStmt(clang::DoStmt* doLoop);
     
     void printResults() const;
     
