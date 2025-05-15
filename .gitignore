@@ -7,3 +7,7 @@ statik
 .DS_Store
 *.log
 compile_commands.json
+
+# Test outputs
+tests/*.out
+tests/test_results.txt
