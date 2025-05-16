@@ -8,8 +8,8 @@ using namespace clang;
 namespace statik {
 
 bool AnalyzerVisitor::VisitFunctionDecl(FunctionDecl* func) {
-    if (!func->hasBody()) {
-        return true;  // Skip declarations without definitions
+    if (!func || !func->hasBody()) {
+        return true;  // Skip null or declarations without definitions
     }
     
     std::string funcName = func->getNameAsString();
@@ -27,7 +27,16 @@ bool AnalyzerVisitor::VisitFunctionDecl(FunctionDecl* func) {
 }
 
 bool AnalyzerVisitor::VisitForStmt(ForStmt* forLoop) {
+    if (!forLoop) {
+        return true;  // Safety check
+    }
+    
     SourceLocation loc = forLoop->getForLoc();
+    if (!loc.isValid()) {
+        std::cout << "Warning: Invalid source location for for loop\n";
+        return true;
+    }
+    
     SourceManager& sm = context_->getSourceManager();
     unsigned line = sm.getSpellingLineNumber(loc);
     
@@ -39,7 +48,16 @@ bool AnalyzerVisitor::VisitForStmt(ForStmt* forLoop) {
 }
 
 bool AnalyzerVisitor::VisitWhileStmt(WhileStmt* whileLoop) {
+    if (!whileLoop) {
+        return true;  // Safety check
+    }
+    
     SourceLocation loc = whileLoop->getWhileLoc();
+    if (!loc.isValid()) {
+        std::cout << "Warning: Invalid source location for while loop\n";
+        return true;
+    }
+    
     SourceManager& sm = context_->getSourceManager();
     unsigned line = sm.getSpellingLineNumber(loc);
     
@@ -51,7 +69,16 @@ bool AnalyzerVisitor::VisitWhileStmt(WhileStmt* whileLoop) {
 }
 
 bool AnalyzerVisitor::VisitDoStmt(DoStmt* doLoop) {
+    if (!doLoop) {
+        return true;  // Safety check
+    }
+    
     SourceLocation loc = doLoop->getDoLoc();
+    if (!loc.isValid()) {
+        std::cout << "Warning: Invalid source location for do-while loop\n";
+        return true;
+    }
+    
     SourceManager& sm = context_->getSourceManager();
     unsigned line = sm.getSpellingLineNumber(loc);
     
