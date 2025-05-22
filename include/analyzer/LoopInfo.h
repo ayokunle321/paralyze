@@ -2,6 +2,7 @@
 
 #include "clang/AST/Stmt.h"
 #include "clang/Basic/SourceLocation.h"
+#include "analyzer/ArrayAccess.h"
 #include <vector>
 
 namespace statik {
@@ -12,9 +13,16 @@ struct LoopInfo {
     unsigned line_number;
     std::string loop_type;  // "for", "while", "do-while"
     
+    // Array access patterns within this loop
+    std::vector<ArrayAccess> array_accesses;
+    
     LoopInfo(clang::Stmt* s, clang::SourceLocation loc, 
              unsigned line, const std::string& type)
         : stmt(s), location(loc), line_number(line), loop_type(type) {}
+        
+    void addArrayAccess(const ArrayAccess& access) {
+        array_accesses.push_back(access);
+    }
 };
 
 } // namespace statik
