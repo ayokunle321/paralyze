@@ -9,7 +9,8 @@ namespace statik {
 
 class LoopVisitor : public clang::RecursiveASTVisitor<LoopVisitor> {
 public:
-    explicit LoopVisitor(clang::ASTContext* context) : context_(context) {}
+    explicit LoopVisitor(clang::ASTContext* context) 
+        : context_(context), current_loop_(nullptr) {}
     
     bool VisitForStmt(clang::ForStmt* forLoop);
     bool VisitWhileStmt(clang::WhileStmt* whileLoop);
