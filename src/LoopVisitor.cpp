@@ -15,6 +15,9 @@ bool LoopVisitor::VisitForStmt(ForStmt* forLoop) {
     SourceLocation loc = forLoop->getForLoc();
     addLoop(forLoop, loc, "for");
     
+    // Analyze loop bounds before traversing body
+    analyzeForLoopBounds(forLoop, loops_.back());
+    
     // Set current loop context and traverse the body
     LoopInfo* prev_loop = current_loop_;
     current_loop_ = &loops_.back();
@@ -65,6 +68,33 @@ bool LoopVisitor::VisitDoStmt(DoStmt* doLoop) {
     return true;
 }
 
+void LoopVisitor::analyzeForLoopBounds(ForStmt* forLoop, LoopInfo& info) {
+    info.bounds.init_expr = forLoop->getInit();
+    info.bounds.condition_expr = forLoop->getCond();
+    info.bounds.increment_expr = forLoop->getInc();
+    
+    // Try to extract iterator variable name from initialization
+    if (auto declStmt = dyn_cast_or_null<DeclStmt>(forLoop->getInit())) {
+        if (declStmt->isSingleDecl()) {
+            if (auto varDecl = dyn_cast<VarDecl>(declStmt->getSingleDecl())) {
+                info.bounds.iterator_var = varDecl->getNameAsString();
+            }
+        }
+    }
+    
+    // Check for simple pattern - we'll improve this logic later
+    if (!info.bounds.iterator_var.empty() && 
+        info.bounds.condition_expr && 
+        info.bounds.increment_expr) {
+        info.bounds.is_simple_pattern = true;  // Rough heuristic for now
+    }
+    
+    if (info.bounds.is_simple_pattern) {
+        std::cout << "  Simple iterator pattern detected: " 
+                  << info.bounds.iterator_var << "\n";
+    }
+}
+
 bool LoopVisitor::VisitArraySubscriptExpr(ArraySubscriptExpr* arrayExpr) {
     if (!arrayExpr || !isInsideLoop()) {
         return true;
@@ -111,6 +141,11 @@ void LoopVisitor::printLoopSummary() const {
     for (const auto& loop : loops_) {
         std::cout << "  " << loop.loop_type << " loop at line " 
                   << loop.line_number;
+        
+        if (loop.bounds.is_simple_pattern) {
+            std::cout << " (simple pattern: " << loop.bounds.iterator_var << ")";
+        }
+        
         if (!loop.array_accesses.empty()) {
             std::cout << " (" << loop.array_accesses.size() << " array accesses)";
         }

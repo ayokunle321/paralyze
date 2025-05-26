@@ -26,6 +26,7 @@ private:
     LoopInfo* current_loop_;  // Track which loop we're currently analyzing
     
     void addLoop(clang::Stmt* stmt, clang::SourceLocation loc, const std::string& type);
+    void analyzeForLoopBounds(clang::ForStmt* forLoop, LoopInfo& info);
     bool isInsideLoop() const { return current_loop_ != nullptr; }
 };
 

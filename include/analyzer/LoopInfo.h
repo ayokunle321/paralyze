@@ -3,6 +3,7 @@
 #include "clang/AST/Stmt.h"
 #include "clang/Basic/SourceLocation.h"
 #include "analyzer/ArrayAccess.h"
+#include "analyzer/LoopBounds.h"
 #include <vector>
 
 namespace statik {
@@ -15,6 +16,9 @@ struct LoopInfo {
     
     // Array access patterns within this loop
     std::vector<ArrayAccess> array_accesses;
+    
+    // Loop bounds information
+    LoopBounds bounds;
     
     LoopInfo(clang::Stmt* s, clang::SourceLocation loc, 
              unsigned line, const std::string& type)
