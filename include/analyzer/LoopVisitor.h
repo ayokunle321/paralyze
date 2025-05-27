@@ -27,6 +27,7 @@ private:
     
     void addLoop(clang::Stmt* stmt, clang::SourceLocation loc, const std::string& type);
     void analyzeForLoopBounds(clang::ForStmt* forLoop, LoopInfo& info);
+    std::string extractArrayBaseName(clang::ArraySubscriptExpr* arrayExpr);
     bool isInsideLoop() const { return current_loop_ != nullptr; }
 };
 

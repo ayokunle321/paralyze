@@ -100,13 +100,8 @@ bool LoopVisitor::VisitArraySubscriptExpr(ArraySubscriptExpr* arrayExpr) {
         return true;
     }
     
-    // Get the base array expression
-    Expr* base = arrayExpr->getBase()->IgnoreParenImpCasts();
-    std::string arrayName = "unknown";
-    
-    if (auto declRef = dyn_cast<DeclRefExpr>(base)) {
-        arrayName = declRef->getDecl()->getNameAsString();
-    }
+    // Handle multi-dimensional arrays properly
+    std::string arrayName = extractArrayBaseName(arrayExpr);
     
     SourceLocation loc = arrayExpr->getExprLoc();
     SourceManager& sm = context_->getSourceManager();
@@ -119,6 +114,24 @@ bool LoopVisitor::VisitArraySubscriptExpr(ArraySubscriptExpr* arrayExpr) {
     std::cout << "  Found array access: " << arrayName << "[] at line " << line << "\n";
     
     return true;
+}
+
+std::string LoopVisitor::extractArrayBaseName(ArraySubscriptExpr* arrayExpr) {
+    // Traverse down to find the actual base array name
+    Expr* base = arrayExpr->getBase()->IgnoreParenImpCasts();
+    
+    // For multi-dimensional arrays like matrix[i][j], 
+    // the base might be another ArraySubscriptExpr
+    while (auto innerArray = dyn_cast<ArraySubscriptExpr>(base)) {
+        base = innerArray->getBase()->IgnoreParenImpCasts();
+    }
+    
+    // Now base should be a DeclRefExpr pointing to the actual array variable
+    if (auto declRef = dyn_cast<DeclRefExpr>(base)) {
+        return declRef->getDecl()->getNameAsString();
+    }
+    
+    return "unknown";
 }
 
 void LoopVisitor::addLoop(Stmt* stmt, SourceLocation loc, const std::string& type) {
