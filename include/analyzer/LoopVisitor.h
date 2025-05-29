@@ -4,13 +4,14 @@
 #include "clang/AST/ASTContext.h"
 #include "analyzer/LoopInfo.h"
 #include <vector>
+#include <stack>
 
 namespace statik {
 
 class LoopVisitor : public clang::RecursiveASTVisitor<LoopVisitor> {
 public:
     explicit LoopVisitor(clang::ASTContext* context) 
-        : context_(context), current_loop_(nullptr) {}
+        : context_(context) {}
     
     bool VisitForStmt(clang::ForStmt* forLoop);
     bool VisitWhileStmt(clang::WhileStmt* whileLoop);
@@ -23,12 +24,15 @@ public:
 private:
     clang::ASTContext* context_;
     std::vector<LoopInfo> loops_;
-    LoopInfo* current_loop_;  // Track which loop we're currently analyzing
+    std::stack<LoopInfo*> loop_stack_;  // Track nesting hierarchy
     
     void addLoop(clang::Stmt* stmt, clang::SourceLocation loc, const std::string& type);
     void analyzeForLoopBounds(clang::ForStmt* forLoop, LoopInfo& info);
     std::string extractArrayBaseName(clang::ArraySubscriptExpr* arrayExpr);
-    bool isInsideLoop() const { return current_loop_ != nullptr; }
+    bool isInsideLoop() const { return !loop_stack_.empty(); }
+    LoopInfo* getCurrentLoop() const { 
+        return loop_stack_.empty() ? nullptr : loop_stack_.top(); 
+    }
 };
 
 } // namespace statik
