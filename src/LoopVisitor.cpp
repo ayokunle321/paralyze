@@ -81,6 +81,55 @@ bool LoopVisitor::VisitDoStmt(DoStmt* doLoop) {
   return true;
 }
 
+bool LoopVisitor::VisitVarDecl(VarDecl* varDecl) {
+  if (!varDecl || !isInsideLoop()) {
+    return true;
+  }
+
+  const std::string varName = varDecl->getNameAsString();
+  VariableScope scope = determineVariableScope(varDecl);
+  SourceLocation loc = varDecl->getLocation();
+
+  VariableInfo varInfo(varName, varDecl, scope, loc);
+  getCurrentLoop()->addVariable(varInfo);
+
+  std::cout << "  Found variable declaration: " << varName 
+            << " (scope: " << (scope == VariableScope::LOOP_LOCAL ? "local" : "external")
+            << ")\n";
+
+  return true;
+}
+
+bool LoopVisitor::VisitDeclRefExpr(DeclRefExpr* declRef) {
+  if (!declRef || !isInsideLoop()) {
+    return true;
+  }
+
+  if (auto* varDecl = dyn_cast<VarDecl>(declRef->getDecl())) {
+    const std::string varName = varDecl->getNameAsString();
+    SourceLocation loc = declRef->getLocation();
+    SourceManager& sm = context_->getSourceManager();
+    unsigned line = sm.getSpellingLineNumber(loc);
+
+    // Simple heuristic: assume it's a read for now
+    // We'll improve this to detect writes vs reads later
+    VariableUsage usage(loc, line, true, false);
+    
+    LoopInfo* currentLoop = getCurrentLoop();
+    auto it = currentLoop->variables.find(varName);
+    if (it == currentLoop->variables.end()) {
+      // Variable not yet tracked, add it
+      VariableScope scope = determineVariableScope(varDecl);
+      VariableInfo varInfo(varName, varDecl, scope, varDecl->getLocation());
+      currentLoop->addVariable(varInfo);
+    }
+    
+    currentLoop->addVariableUsage(varName, usage);
+  }
+
+  return true;
+}
+
 void LoopVisitor::analyzeForLoopBounds(ForStmt* forLoop, LoopInfo& info) {
   info.bounds.init_expr = forLoop->getInit();
   info.bounds.condition_expr = forLoop->getCond();
@@ -142,6 +191,25 @@ std::string LoopVisitor::extractArrayBaseName(ArraySubscriptExpr* arrayExpr) {
   return "unknown";
 }
 
+VariableScope LoopVisitor::determineVariableScope(VarDecl* varDecl) const {
+  // Simple heuristic for now - we can improve this later
+  if (!varDecl) {
+    return VariableScope::GLOBAL;
+  }
+
+  // Check if declared within current loop body (rough approximation)
+  SourceManager& sm = context_->getSourceManager();
+  SourceLocation declLoc = varDecl->getLocation();
+  
+  if (!isInsideLoop()) {
+    return VariableScope::FUNCTION_LOCAL;
+  }
+  
+  // For now, assume variables found while traversing loop are loop-local
+  // This is a simplification - real implementation would check scopes more carefully
+  return VariableScope::LOOP_LOCAL;
+}
+
 void LoopVisitor::addLoop(Stmt* stmt, SourceLocation loc,
                           const std::string& type) {
   if (!loc.isValid()) {
@@ -188,12 +256,30 @@ void LoopVisitor::printLoopSummary() const {
     if (!loop.array_accesses.empty()) {
       std::cout << " [" << loop.array_accesses.size() << " accesses]";
     }
+    
+    if (!loop.variables.empty()) {
+      std::cout << " [" << loop.variables.size() << " variables]";
+    }
 
     if (loop.isOutermost()) {
       std::cout << " ← PARALLELIZABLE?";
     }
 
     std::cout << "\n";
+    
+    // Print variable details for outermost loops
+    if (loop.isOutermost() && !loop.variables.empty()) {
+      for (unsigned i = 0; i <= loop.depth; i++) std::cout << "  ";
+      std::cout << "Variables: ";
+      for (const auto& var_pair : loop.variables) {
+        const auto& var = var_pair.second;
+        std::cout << var.name;
+        if (var.hasWrites()) std::cout << "(W)";
+        if (var.hasReads()) std::cout << "(R)";
+        std::cout << " ";
+      }
+      std::cout << "\n";
+    }
   }
 }
 
