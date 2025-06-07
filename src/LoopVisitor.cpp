@@ -99,7 +99,6 @@ bool LoopVisitor::VisitVarDecl(VarDecl* varDecl) {
 
   return true;
 }
-
 bool LoopVisitor::VisitDeclRefExpr(DeclRefExpr* declRef) {
   if (!declRef || !isInsideLoop()) {
     return true;
@@ -111,9 +110,11 @@ bool LoopVisitor::VisitDeclRefExpr(DeclRefExpr* declRef) {
     SourceManager& sm = context_->getSourceManager();
     unsigned line = sm.getSpellingLineNumber(loc);
 
-    // Simple heuristic: assume it's a read for now
-    // We'll improve this to detect writes vs reads later
-    VariableUsage usage(loc, line, true, false);
+    // Determine if this is a read or write by looking at parent context
+    bool isWrite = isWriteAccess(declRef);
+    bool isRead = !isWrite; // If not a write, assume it's a read
+    
+    VariableUsage usage(loc, line, isRead, isWrite);
     
     LoopInfo* currentLoop = getCurrentLoop();
     auto it = currentLoop->variables.find(varName);
@@ -125,8 +126,55 @@ bool LoopVisitor::VisitDeclRefExpr(DeclRefExpr* declRef) {
     }
     
     currentLoop->addVariableUsage(varName, usage);
+    
+    std::cout << "  Variable " << varName << " " 
+              << (isWrite ? "written" : "read") << " at line " << line << "\n";
   }
 
+  return true;
+}
+
+bool LoopVisitor::isWriteAccess(DeclRefExpr* declRef) {
+  // Look at parent nodes to determine if this is a write access
+  auto parents = context_->getParents(*declRef);
+  
+  for (const auto& parent : parents) {
+    if (auto* binaryOp = parent.get<BinaryOperator>()) {
+      // Check if this declRef is the LHS of an assignment
+      if (binaryOp->isAssignmentOp() && binaryOp->getLHS() == declRef) {
+        return true;
+      }
+    } else if (auto* unaryOp = parent.get<UnaryOperator>()) {
+      // Check for increment/decrement operators
+      if (unaryOp->isIncrementDecrementOp()) {
+        return true;
+      }
+    } else if (auto* compoundAssign = parent.get<CompoundAssignOperator>()) {
+      // +=, -=, *=, etc.
+      if (compoundAssign->getLHS() == declRef) {
+        return true;
+      }
+    }
+  }
+  
+  return false; // Default to read access
+}
+
+// Add new method to header and implement here
+bool LoopVisitor::VisitBinaryOperator(BinaryOperator* binOp) {
+  if (!binOp || !isInsideLoop()) {
+    return true;
+  }
+  
+  // Track assignment operations for better analysis
+  if (binOp->isAssignmentOp()) {
+    SourceLocation loc = binOp->getOperatorLoc();
+    SourceManager& sm = context_->getSourceManager();
+    unsigned line = sm.getSpellingLineNumber(loc);
+    
+    std::cout << "  Found assignment operation at line " << line << "\n";
+  }
+  
   return true;
 }
 
@@ -267,18 +315,25 @@ void LoopVisitor::printLoopSummary() const {
 
     std::cout << "\n";
     
-    // Print variable details for outermost loops
+    // Print detailed variable analysis for outermost loops
     if (loop.isOutermost() && !loop.variables.empty()) {
       for (unsigned i = 0; i <= loop.depth; i++) std::cout << "  ";
-      std::cout << "Variables: ";
+      std::cout << "Variable analysis:\n";
+      
       for (const auto& var_pair : loop.variables) {
         const auto& var = var_pair.second;
-        std::cout << var.name;
-        if (var.hasWrites()) std::cout << "(W)";
-        if (var.hasReads()) std::cout << "(R)";
-        std::cout << " ";
+        for (unsigned i = 0; i <= loop.depth + 1; i++) std::cout << "  ";
+        
+        std::cout << var.name << ": ";
+        if (var.hasReads() && var.hasWrites()) {
+          std::cout << "READ+WRITE (potential dependency)";
+        } else if (var.hasWrites()) {
+          std::cout << "WRITE-ONLY";
+        } else if (var.hasReads()) {
+          std::cout << "READ-ONLY (safe)";
+        }
+        std::cout << " [" << var.usages.size() << " uses]\n";
       }
-      std::cout << "\n";
     }
   }
 }
