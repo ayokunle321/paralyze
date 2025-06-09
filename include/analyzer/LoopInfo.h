@@ -5,6 +5,7 @@
 #include "analyzer/ArrayAccess.h"
 #include "analyzer/LoopBounds.h"
 #include "analyzer/VariableInfo.h"
+#include "analyzer/LoopMetrics.h"
 #include <vector>
 #include <map>
 
@@ -29,6 +30,9 @@ struct LoopInfo {
   
   // Variable usage tracking
   std::map<std::string, VariableInfo> variables;
+  
+  // Performance metrics
+  LoopMetrics metrics;
 
   LoopInfo(clang::Stmt* s, clang::SourceLocation loc, unsigned line,
            const std::string& type)
@@ -37,6 +41,7 @@ struct LoopInfo {
 
   void addArrayAccess(const ArrayAccess& access) {
     array_accesses.push_back(access);
+    metrics.memory_accesses++; // Count array access as memory operation
   }
 
   void setParent(LoopInfo* parent) {
@@ -57,8 +62,18 @@ struct LoopInfo {
       it->second.addUsage(usage);
     }
   }
+  
+  void incrementArithmeticOps() { metrics.arithmetic_ops++; }
+  void incrementFunctionCalls() { metrics.function_calls++; }
+  void incrementComparisons() { metrics.comparisons++; }
+  void incrementAssignments() { metrics.assignments++; }
+  
+  void finalizeMetrics() {
+    metrics.calculateHotness();
+  }
 
   bool isOutermost() const { return depth == 0; }
+  bool isHot() const { return metrics.hotness_score > 10.0; } // Threshold
 };
 
 } // namespace statik

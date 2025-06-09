@@ -19,6 +19,8 @@ public:
   bool VisitVarDecl(clang::VarDecl* varDecl);
   bool VisitDeclRefExpr(clang::DeclRefExpr* declRef);
   bool VisitBinaryOperator(clang::BinaryOperator* binOp);
+  bool VisitUnaryOperator(clang::UnaryOperator* unaryOp);
+  bool VisitCallExpr(clang::CallExpr* callExpr);
 
   const std::vector<LoopInfo>& getLoops() const { return loops_; }
   void printLoopSummary() const;
@@ -34,6 +36,8 @@ private:
   std::string extractArrayBaseName(clang::ArraySubscriptExpr* arrayExpr);
   VariableScope determineVariableScope(clang::VarDecl* varDecl) const;
   bool isWriteAccess(clang::DeclRefExpr* declRef);
+  bool isArithmeticOp(clang::BinaryOperator* binOp);
+  bool isComparisonOp(clang::BinaryOperator* binOp);
   bool isInsideLoop() const { return !loop_stack_.empty(); }
   LoopInfo* getCurrentLoop() const {
     return loop_stack_.empty() ? nullptr : loop_stack_.top();
