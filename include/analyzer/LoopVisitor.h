@@ -33,6 +33,7 @@ private:
   void addLoop(clang::Stmt* stmt, clang::SourceLocation loc,
                const std::string& type);
   void analyzeForLoopBounds(clang::ForStmt* forLoop, LoopInfo& info);
+  void markInductionVariable(LoopInfo& loop);
   std::string extractArrayBaseName(clang::ArraySubscriptExpr* arrayExpr);
   VariableScope determineVariableScope(clang::VarDecl* varDecl) const;
   bool isWriteAccess(clang::DeclRefExpr* declRef);

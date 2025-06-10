@@ -21,7 +21,7 @@ bool LoopVisitor::VisitForStmt(ForStmt* forLoop) {
     newLoop->setParent(loop_stack_.top());
   }
 
-  // Analyze loop bounds
+  // Analyze loop bounds and identify induction variable
   analyzeForLoopBounds(forLoop, *newLoop);
 
   // Push this loop onto stack and traverse body
@@ -30,6 +30,9 @@ bool LoopVisitor::VisitForStmt(ForStmt* forLoop) {
   if (forLoop->getBody()) {
     TraverseStmt(forLoop->getBody());
   }
+
+  // After traversing, mark the induction variable
+  markInductionVariable(*newLoop);
 
   // Finalize metrics before popping
   newLoop->finalizeMetrics();
@@ -132,8 +135,11 @@ bool LoopVisitor::VisitDeclRefExpr(DeclRefExpr* declRef) {
     
     currentLoop->addVariableUsage(varName, usage);
     
-    std::cout << "  Variable " << varName << " " 
-              << (isWrite ? "written" : "read") << " at line " << line << "\n";
+    // Don't spam output for induction variables
+    if (varName != currentLoop->bounds.iterator_var) {
+      std::cout << "  Variable " << varName << " " 
+                << (isWrite ? "written" : "read") << " at line " << line << "\n";
+    }
   }
 
   return true;
@@ -212,6 +218,18 @@ void LoopVisitor::analyzeForLoopBounds(ForStmt* forLoop, LoopInfo& info) {
   if (info.bounds.is_simple_pattern) {
     std::cout << "  Simple iterator pattern detected: "
               << info.bounds.iterator_var << " (depth " << info.depth << ")\n";
+  }
+}
+
+void LoopVisitor::markInductionVariable(LoopInfo& loop) {
+  // Mark the loop iterator as an induction variable
+  if (!loop.bounds.iterator_var.empty()) {
+    auto it = loop.variables.find(loop.bounds.iterator_var);
+    if (it != loop.variables.end()) {
+      it->second.setRole(VariableRole::INDUCTION_VAR);
+      std::cout << "  Marked " << loop.bounds.iterator_var 
+                << " as induction variable (safe for parallelization)\n";
+    }
   }
 }
 
@@ -327,12 +345,29 @@ void LoopVisitor::printLoopSummary() const {
   // Count outermost loops and hot loops
   size_t outermost_count = 0;
   size_t hot_loops = 0;
+  size_t potentially_parallel = 0;
+  
   for (const auto& loop : loops_) {
     if (loop.isOutermost()) outermost_count++;
     if (loop.isHot()) hot_loops++;
+    
+    // Check if loop has any real dependencies (excluding induction vars)
+    bool has_dependencies = false;
+    for (const auto& var_pair : loop.variables) {
+      if (var_pair.second.isPotentialDependency()) {
+        has_dependencies = true;
+        break;
+      }
+    }
+    
+    if (loop.isOutermost() && !has_dependencies) {
+      potentially_parallel++;
+    }
   }
+  
   std::cout << "Outermost loops: " << outermost_count << "\n";
-  std::cout << "Hot loops (high computation): " << hot_loops << "\n\n";
+  std::cout << "Hot loops (high computation): " << hot_loops << "\n";
+  std::cout << "Potentially parallelizable: " << potentially_parallel << "\n\n";
 
   for (const auto& loop : loops_) {
     // Indent based on depth
@@ -350,21 +385,49 @@ void LoopVisitor::printLoopSummary() const {
     std::cout << " [hotness: " << loop.metrics.hotness_score << "]";
     
     if (loop.isHot()) {
-      std::cout << " 🔥 HOT";
+      std::cout << " HOT";
+    }
+
+    // Check for real dependencies
+    bool has_real_deps = false;
+    for (const auto& var_pair : loop.variables) {
+      if (var_pair.second.isPotentialDependency()) {
+        has_real_deps = true;
+        break;
+      }
     }
 
     if (loop.isOutermost()) {
-      std::cout << " ← PARALLELIZABLE?";
+      if (!has_real_deps) {
+        std::cout << " SAFE TO PARALLELIZE";
+      } else {
+        std::cout << " HAS DEPENDENCIES";
+      }
     }
 
     std::cout << "\n";
     
-    // Print operation breakdown for hot loops
-    if (loop.isHot()) {
+    // Print detailed dependency analysis for outermost loops
+    if (loop.isOutermost() && !loop.variables.empty()) {
       for (unsigned i = 0; i <= loop.depth; i++) std::cout << "  ";
-      std::cout << "Operations: " << loop.metrics.arithmetic_ops << " arith, "
-                << loop.metrics.memory_accesses << " memory, "
-                << loop.metrics.function_calls << " calls\n";
+      std::cout << "Variable analysis:\n";
+      
+      for (const auto& var_pair : loop.variables) {
+        const auto& var = var_pair.second;
+        for (unsigned i = 0; i <= loop.depth + 1; i++) std::cout << "  ";
+        
+        std::cout << var.name << ": ";
+        if (var.isInductionVariable()) {
+          std::cout << "INDUCTION VAR (safe)";
+        } else if (var.isPotentialDependency()) {
+          std::cout << "READ+WRITE (dependency)";
+        } else if (var.hasWrites()) {
+          std::cout << "WRITE-ONLY (safe)";
+        } else if (var.hasReads()) {
+          std::cout << "READ-ONLY (safe)";
+        }
+        std::cout << " [" << var.usages.size() << " uses]\n";
+      }
     }
   }
 }
