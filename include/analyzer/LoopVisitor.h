@@ -3,14 +3,17 @@
 #include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/AST/ASTContext.h"
 #include "analyzer/LoopInfo.h"
+#include "analyzer/DependencyAnalyzer.h"
 #include <vector>
 #include <stack>
+#include <memory>
 
 namespace statik {
 
 class LoopVisitor : public clang::RecursiveASTVisitor<LoopVisitor> {
 public:
-  explicit LoopVisitor(clang::ASTContext* context) : context_(context) {}
+  explicit LoopVisitor(clang::ASTContext* context) 
+      : context_(context), dependency_analyzer_(std::make_unique<DependencyAnalyzer>(context)) {}
 
   bool VisitForStmt(clang::ForStmt* forLoop);
   bool VisitWhileStmt(clang::WhileStmt* whileLoop);
@@ -29,11 +32,13 @@ private:
   clang::ASTContext* context_;
   std::vector<LoopInfo> loops_;
   std::stack<LoopInfo*> loop_stack_; // Track nesting hierarchy
+  std::unique_ptr<DependencyAnalyzer> dependency_analyzer_;
 
   void addLoop(clang::Stmt* stmt, clang::SourceLocation loc,
                const std::string& type);
   void analyzeForLoopBounds(clang::ForStmt* forLoop, LoopInfo& info);
   void markInductionVariable(LoopInfo& loop);
+  void finalizeDependencyAnalysis(LoopInfo& loop);
   std::string extractArrayBaseName(clang::ArraySubscriptExpr* arrayExpr);
   VariableScope determineVariableScope(clang::VarDecl* varDecl) const;
   bool isWriteAccess(clang::DeclRefExpr* declRef);

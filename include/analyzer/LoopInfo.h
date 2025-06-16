@@ -11,6 +11,9 @@
 
 namespace statik {
 
+// Forward declaration
+struct Dependency;
+
 struct LoopInfo {
   clang::Stmt* stmt;
   clang::SourceLocation location;
@@ -33,11 +36,15 @@ struct LoopInfo {
   
   // Performance metrics
   LoopMetrics metrics;
+  
+  // Dependency information
+  std::vector<Dependency> dependencies;
+  bool has_dependencies;
 
   LoopInfo(clang::Stmt* s, clang::SourceLocation loc, unsigned line,
            const std::string& type)
       : stmt(s), location(loc), line_number(line), loop_type(type), depth(0),
-        parent_loop(nullptr) {}
+        parent_loop(nullptr), has_dependencies(false) {}
 
   void addArrayAccess(const ArrayAccess& access) {
     array_accesses.push_back(access);
@@ -71,9 +78,14 @@ struct LoopInfo {
   void finalizeMetrics() {
     metrics.calculateHotness();
   }
+  
+  void setHasDependencies(bool deps) {
+    has_dependencies = deps;
+  }
 
   bool isOutermost() const { return depth == 0; }
-  bool isHot() const { return metrics.hotness_score > 10.0; } // Threshold
+  bool isHot() const { return metrics.hotness_score > 10.0; }
+  bool isParallelizable() const { return !has_dependencies; }
 };
 
 } // namespace statik
