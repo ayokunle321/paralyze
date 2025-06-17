@@ -34,6 +34,9 @@ bool LoopVisitor::VisitForStmt(ForStmt* forLoop) {
   // After traversing, mark the induction variable
   markInductionVariable(*newLoop);
 
+  // Run dependency analysis
+  finalizeDependencyAnalysis(*newLoop);
+
   // Finalize metrics before popping
   newLoop->finalizeMetrics();
   loop_stack_.pop();
@@ -59,6 +62,8 @@ bool LoopVisitor::VisitWhileStmt(WhileStmt* whileLoop) {
     TraverseStmt(whileLoop->getBody());
   }
 
+  markInductionVariable(*newLoop);
+  finalizeDependencyAnalysis(*newLoop);
   newLoop->finalizeMetrics();
   loop_stack_.pop();
   return true;
@@ -83,6 +88,8 @@ bool LoopVisitor::VisitDoStmt(DoStmt* doLoop) {
     TraverseStmt(doLoop->getBody());
   }
 
+  markInductionVariable(*newLoop);
+  finalizeDependencyAnalysis(*newLoop);
   newLoop->finalizeMetrics();
   loop_stack_.pop();
   return true;
@@ -233,6 +240,12 @@ void LoopVisitor::markInductionVariable(LoopInfo& loop) {
   }
 }
 
+void LoopVisitor::finalizeDependencyAnalysis(LoopInfo& loop) {
+  dependency_analyzer_->analyzeDependencies(loop);
+  bool has_deps = dependency_analyzer_->hasDependencies(loop);
+  loop.setHasDependencies(has_deps);
+}
+
 bool LoopVisitor::VisitArraySubscriptExpr(ArraySubscriptExpr* arrayExpr) {
   if (!arrayExpr || !isInsideLoop()) {
     return true;
@@ -342,32 +355,20 @@ void LoopVisitor::printLoopSummary() const {
   std::cout << "\n=== Loop Analysis Summary ===\n";
   std::cout << "Total loops detected: " << loops_.size() << "\n";
 
-  // Count outermost loops and hot loops
+  // Count different categories
   size_t outermost_count = 0;
   size_t hot_loops = 0;
-  size_t potentially_parallel = 0;
+  size_t parallelizable = 0;
   
   for (const auto& loop : loops_) {
     if (loop.isOutermost()) outermost_count++;
     if (loop.isHot()) hot_loops++;
-    
-    // Check if loop has any real dependencies (excluding induction vars)
-    bool has_dependencies = false;
-    for (const auto& var_pair : loop.variables) {
-      if (var_pair.second.isPotentialDependency()) {
-        has_dependencies = true;
-        break;
-      }
-    }
-    
-    if (loop.isOutermost() && !has_dependencies) {
-      potentially_parallel++;
-    }
+    if (loop.isOutermost() && loop.isParallelizable()) parallelizable++;
   }
   
   std::cout << "Outermost loops: " << outermost_count << "\n";
   std::cout << "Hot loops (high computation): " << hot_loops << "\n";
-  std::cout << "Potentially parallelizable: " << potentially_parallel << "\n\n";
+  std::cout << "Safe for parallelization: " << parallelizable << "\n\n";
 
   for (const auto& loop : loops_) {
     // Indent based on depth
@@ -388,17 +389,8 @@ void LoopVisitor::printLoopSummary() const {
       std::cout << " HOT";
     }
 
-    // Check for real dependencies
-    bool has_real_deps = false;
-    for (const auto& var_pair : loop.variables) {
-      if (var_pair.second.isPotentialDependency()) {
-        has_real_deps = true;
-        break;
-      }
-    }
-
     if (loop.isOutermost()) {
-      if (!has_real_deps) {
+      if (loop.isParallelizable()) {
         std::cout << " SAFE TO PARALLELIZE";
       } else {
         std::cout << " HAS DEPENDENCIES";
@@ -407,7 +399,7 @@ void LoopVisitor::printLoopSummary() const {
 
     std::cout << "\n";
     
-    // Print detailed dependency analysis for outermost loops
+    // Print detailed analysis for outermost loops
     if (loop.isOutermost() && !loop.variables.empty()) {
       for (unsigned i = 0; i <= loop.depth; i++) std::cout << "  ";
       std::cout << "Variable analysis:\n";
