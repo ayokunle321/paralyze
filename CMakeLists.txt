@@ -24,6 +24,7 @@ add_executable(statik
     src/ASTVisitor.cpp
     src/LoopVisitor.cpp
     src/DependencyAnalyzer.cpp
+    src/ArrayDependencyAnalyzer.cpp
 )
 
 target_link_libraries(statik
