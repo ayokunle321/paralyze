@@ -18,9 +18,13 @@ void DependencyAnalyzer::analyzeDependencies(LoopInfo& loop) {
   // Analyze pointer usage and aliasing
   pointer_analyzer_->analyzePointerUsage(loop);
   
+  // Analyze function calls for side effects
+  function_analyzer_->analyzeFunctionCalls(loop);
+  
   bool has_scalar_deps = false;
   bool has_array_deps = array_analyzer_->hasArrayDependencies(loop);
   bool has_pointer_risk = (pointer_analyzer_->getPointerRisk(loop) != PointerRisk::SAFE);
+  bool has_unsafe_calls = (function_analyzer_->getFunctionCallSafety(loop) == FunctionCallSafety::UNSAFE);
   
   // Check scalar dependencies
   for (const auto& var_pair : loop.variables) {
@@ -34,7 +38,7 @@ void DependencyAnalyzer::analyzeDependencies(LoopInfo& loop) {
     }
   }
   
-  if (has_scalar_deps || has_array_deps || has_pointer_risk) {
+  if (has_scalar_deps || has_array_deps || has_pointer_risk || has_unsafe_calls) {
     std::cout << "  Dependencies found - not safe for parallelization\n";
     loop.setHasDependencies(true);
   } else {
@@ -59,7 +63,8 @@ bool DependencyAnalyzer::hasDependencies(const LoopInfo& loop) const {
   
   // Check array dependencies
   return array_analyzer_->hasArrayDependencies(loop) || 
-         (pointer_analyzer_->getPointerRisk(loop) != PointerRisk::SAFE);
+         (pointer_analyzer_->getPointerRisk(loop) != PointerRisk::SAFE) ||
+         (function_analyzer_->getFunctionCallSafety(loop) == FunctionCallSafety::UNSAFE);
 }
 
 void DependencyAnalyzer::analyzeScalarDependencies(LoopInfo& loop) {
