@@ -9,22 +9,40 @@ void DependencyAnalyzer::analyzeDependencies(LoopInfo& loop) {
   std::cout << "  Analyzing dependencies for loop at line "
            << loop.line_number << "\n";
   
-  // Analyze scalar variable dependencies
-  analyzeScalarDependencies(loop);
-  
-  // Analyze array access dependencies
-  array_analyzer_->analyzeArrayDependencies(loop);
-  
-  // Analyze pointer usage and aliasing
-  pointer_analyzer_->analyzePointerUsage(loop);
-  
-  // Analyze function calls for side effects
-  function_analyzer_->analyzeFunctionCalls(loop);
-  
   bool has_scalar_deps = false;
-  bool has_array_deps = array_analyzer_->hasArrayDependencies(loop);
-  bool has_pointer_risk = (pointer_analyzer_->getPointerRisk(loop) != PointerRisk::SAFE);
-  bool has_unsafe_calls = (function_analyzer_->getFunctionCallSafety(loop) == FunctionCallSafety::UNSAFE);
+  bool has_array_deps = false;
+  bool has_pointer_risk = false;
+  bool has_unsafe_calls = false;
+  
+  try {
+    // Analyze scalar variable dependencies
+    analyzeScalarDependencies(loop);
+    
+    // Analyze array access dependencies
+    array_analyzer_->analyzeArrayDependencies(loop);
+    has_array_deps = array_analyzer_->hasArrayDependencies(loop);
+  } catch (...) {
+    std::cout << "  Warning: Array dependency analysis failed - assuming unsafe\n";
+    has_array_deps = true;
+  }
+  
+  try {
+    // Analyze pointer usage and aliasing
+    pointer_analyzer_->analyzePointerUsage(loop);
+    has_pointer_risk = (pointer_analyzer_->getPointerRisk(loop) != PointerRisk::SAFE);
+  } catch (...) {
+    std::cout << "  Warning: Pointer analysis failed - assuming unsafe\n";
+    has_pointer_risk = true;
+  }
+  
+  try {
+    // Analyze function calls for side effects
+    function_analyzer_->analyzeFunctionCalls(loop);
+    has_unsafe_calls = (function_analyzer_->getFunctionCallSafety(loop) == FunctionCallSafety::UNSAFE);
+  } catch (...) {
+    std::cout << "  Warning: Function call analysis failed - assuming unsafe\n";
+    has_unsafe_calls = true;
+  }
   
   // Check scalar dependencies
   for (const auto& var_pair : loop.variables) {
