@@ -12,7 +12,7 @@ void ArrayDependencyAnalyzer::analyzeArrayDependencies(LoopInfo& loop) {
   std::cout << "  Analyzing array dependencies for " 
            << loop.array_accesses.size() << " array accesses\n";
   
-  // Compare every pair of array accesses
+  // Compare every pair of array accesses for basic conflicts
   for (size_t i = 0; i < loop.array_accesses.size(); i++) {
     for (size_t j = i + 1; j < loop.array_accesses.size(); j++) {
       const ArrayAccess& access1 = loop.array_accesses[i];
@@ -25,17 +25,26 @@ void ArrayDependencyAnalyzer::analyzeArrayDependencies(LoopInfo& loop) {
     }
   }
   
+  // Run cross-iteration analysis for more sophisticated conflict detection
+  cross_iteration_analyzer_->analyzeCrossIterationConflicts(loop);
+  
   std::cout << "  Found " << detected_dependencies_.size() 
-           << " potential array dependencies\n";
+           << " basic array dependencies\n";
 }
 
 bool ArrayDependencyAnalyzer::hasArrayDependencies(const LoopInfo& loop) const {
-  // Any detected dependency (except NO_DEPENDENCY) is problematic
+  // Check basic array dependencies
   for (const auto& dep : detected_dependencies_) {
     if (dep.type != ArrayDependencyType::NO_DEPENDENCY) {
       return true;
     }
   }
+  
+  // Check cross-iteration conflicts
+  if (cross_iteration_analyzer_->hasCrossIterationConflicts(loop)) {
+    return true;
+  }
+  
   return false;
 }
 

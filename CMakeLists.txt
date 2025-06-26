@@ -27,6 +27,7 @@ add_executable(statik
     src/ArrayDependencyAnalyzer.cpp
     src/PointerAnalyzer.cpp
     src/FunctionCallAnalyzer.cpp
+    src/CrossIterationAnalyzer.cpp
 )
 
 target_link_libraries(statik
