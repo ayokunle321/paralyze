@@ -1,0 +1,32 @@
+#!/bin/bash
+echo "=== Comprehensive Dependency Analysis Test Suite ==="
+echo
+cd ../build
+echo "Running analysis on dependency_analysis.c..."
+echo
+./statik ../tests/dependency_analysis.c
+echo ""
+echo "=========================================="
+echo "Expected Results Summary:"
+echo "=========================================="
+echo "SAFE TO PARALLELIZE:"
+echo "- test_simple_safe: independent array operations"
+echo "- test_write_only: only writing to results array"
+echo "- test_math_functions: pure mathematical functions"
+echo ""
+echo "HAS DEPENDENCIES (UNSAFE):"
+echo "- test_loop_carried_dependency: arr[i] depends on arr[i-1]"
+echo "- test_scalar_dependency: sum variable read+write"
+echo "- test_pointer_operations: pointer arithmetic and dereference"
+echo "- test_function_calls: rand() and printf() side effects"
+echo "- test_complex_indexing: complex matrix indexing"
+echo "- test_cross_iteration: buffer[i-2] and buffer[i+1] conflicts"
+echo "- test_nested_loops: inner loop has dependency"
+echo "- test_pointer_aliasing: potential ptr1/ptr2 aliasing"
+echo "- test_reduction_local: total variable dependency"
+echo ""
+echo "Notes:"
+echo "- Nested loops: outer loop analysis depends on inner loop safety"
+echo "- Function calls: math functions may be marked potentially safe"
+echo "- Complex indexing: conservative analysis assumes unsafe"
+echo "- Cross-iteration: detects offset-based conflicts"
