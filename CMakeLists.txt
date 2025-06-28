@@ -24,6 +24,7 @@ add_executable(statik
     src/ASTVisitor.cpp
     src/LoopVisitor.cpp
     src/DependencyAnalyzer.cpp
+    src/DependencyManager.cpp
     src/ArrayDependencyAnalyzer.cpp
     src/PointerAnalyzer.cpp
     src/FunctionCallAnalyzer.cpp
