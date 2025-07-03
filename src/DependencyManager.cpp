@@ -9,7 +9,8 @@ DependencyManager::DependencyManager(ASTContext* context)
     : context_(context),
       array_analyzer_(std::make_unique<ArrayDependencyAnalyzer>(context)),
       pointer_analyzer_(std::make_unique<PointerAnalyzer>(context)),
-      function_analyzer_(std::make_unique<FunctionCallAnalyzer>(context)) {
+      function_analyzer_(std::make_unique<FunctionCallAnalyzer>(context)),
+      location_mapper_(std::make_unique<PragmaLocationMapper>(&context->getSourceManager())) {
 }
 
 void DependencyManager::analyzeLoop(LoopInfo& loop) {
@@ -162,6 +163,25 @@ bool DependencyManager::hasScalarDependencies(const LoopInfo& loop) const {
   }
   
   return false;
+}
+
+void DependencyManager::mapPragmaLocations(const std::vector<LoopInfo>& loops) {
+  location_mapper_->clearInsertionPoints();
+  
+  std::cout << "\n=== Mapping Pragma Insertion Points ===\n";
+  
+  for (const auto& loop : loops) {
+    // Only map locations for parallelizable loops
+    if (isLoopParallelizable(loop)) {
+      location_mapper_->mapLoopToPragmaLocation(loop);
+    } else {
+      std::cout << "  Skipping unsafe loop at line " << loop.line_number << "\n";
+    }
+  }
+  
+  const auto& points = location_mapper_->getInsertionPoints();
+  std::cout << "  Total pragma insertion points identified: " << points.size() << "\n";
+  std::cout << "==============================\n";
 }
 
 } // namespace statik
