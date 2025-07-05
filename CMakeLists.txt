@@ -30,6 +30,7 @@ add_executable(statik
     src/FunctionCallAnalyzer.cpp
     src/CrossIterationAnalyzer.cpp
     src/PragmaLocationMapper.cpp
+    src/PragmaGenerator.cpp
 )
 
 target_link_libraries(statik

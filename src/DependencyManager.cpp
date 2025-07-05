@@ -10,7 +10,8 @@ DependencyManager::DependencyManager(ASTContext* context)
       array_analyzer_(std::make_unique<ArrayDependencyAnalyzer>(context)),
       pointer_analyzer_(std::make_unique<PointerAnalyzer>(context)),
       function_analyzer_(std::make_unique<FunctionCallAnalyzer>(context)),
-      location_mapper_(std::make_unique<PragmaLocationMapper>(&context->getSourceManager())) {
+      location_mapper_(std::make_unique<PragmaLocationMapper>(&context->getSourceManager())),
+      pragma_generator_(std::make_unique<PragmaGenerator>()) {
 }
 
 void DependencyManager::analyzeLoop(LoopInfo& loop) {
@@ -182,6 +183,11 @@ void DependencyManager::mapPragmaLocations(const std::vector<LoopInfo>& loops) {
   const auto& points = location_mapper_->getInsertionPoints();
   std::cout << "  Total pragma insertion points identified: " << points.size() << "\n";
   std::cout << "==============================\n";
+}
+
+void DependencyManager::generatePragmas(const std::vector<LoopInfo>& loops) {
+  pragma_generator_->generatePragmasForLoops(loops);
+  pragma_generator_->printPragmaSummary();
 }
 
 } // namespace statik
