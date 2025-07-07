@@ -7,6 +7,7 @@
 #include "analyzer/FunctionCallAnalyzer.h"
 #include "analyzer/PragmaLocationMapper.h"
 #include "analyzer/PragmaGenerator.h"
+#include "analyzer/SourceAnnotator.h"
 #include <memory>
 #include <vector>
 
@@ -26,6 +27,10 @@ public:
   // Pragma generation
   void generatePragmas(const std::vector<LoopInfo>& loops);
   
+  // Source annotation with pragmas
+  void annotateSourceFile(const std::string& input_filename, 
+                         const std::string& output_filename);
+  
   // Get detailed analysis results
   const std::vector<std::string>& getAnalysisWarnings() const { return warnings_; }
   void clearWarnings() { warnings_.clear(); }
@@ -39,6 +44,7 @@ private:
   std::unique_ptr<FunctionCallAnalyzer> function_analyzer_;
   std::unique_ptr<PragmaLocationMapper> location_mapper_;
   std::unique_ptr<PragmaGenerator> pragma_generator_;
+  std::unique_ptr<SourceAnnotator> source_annotator_;
   
   // Analysis state
   std::vector<std::string> warnings_;

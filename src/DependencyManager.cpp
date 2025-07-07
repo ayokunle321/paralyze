@@ -11,7 +11,8 @@ DependencyManager::DependencyManager(ASTContext* context)
       pointer_analyzer_(std::make_unique<PointerAnalyzer>(context)),
       function_analyzer_(std::make_unique<FunctionCallAnalyzer>(context)),
       location_mapper_(std::make_unique<PragmaLocationMapper>(&context->getSourceManager())),
-      pragma_generator_(std::make_unique<PragmaGenerator>()) {
+      pragma_generator_(std::make_unique<PragmaGenerator>()),
+      source_annotator_(std::make_unique<SourceAnnotator>(&context->getSourceManager())) {
 }
 
 void DependencyManager::analyzeLoop(LoopInfo& loop) {
@@ -188,6 +189,18 @@ void DependencyManager::mapPragmaLocations(const std::vector<LoopInfo>& loops) {
 void DependencyManager::generatePragmas(const std::vector<LoopInfo>& loops) {
   pragma_generator_->generatePragmasForLoops(loops);
   pragma_generator_->printPragmaSummary();
+}
+
+void DependencyManager::annotateSourceFile(const std::string& input_filename, 
+                                          const std::string& output_filename) {
+  const auto& pragmas = pragma_generator_->getGeneratedPragmas();
+  const auto& insertion_points = location_mapper_->getInsertionPoints();
+  
+  source_annotator_->annotateSourceWithPragmas(input_filename, pragmas, insertion_points);
+  
+  if (source_annotator_->writeAnnotatedFile(output_filename)) {
+    source_annotator_->printAnnotationSummary();
+  }
 }
 
 } // namespace statik
