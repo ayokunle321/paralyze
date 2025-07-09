@@ -25,7 +25,17 @@ void PragmaLocationMapper::mapLoopToPragmaLocation(const LoopInfo& loop) {
     return;
   }
   
-  unsigned line = source_manager_->getSpellingLineNumber(pragma_loc);
+  // Get both spelling and expansion line numbers for comparison
+  unsigned spelling_line = source_manager_->getSpellingLineNumber(pragma_loc);
+  unsigned expansion_line = source_manager_->getExpansionLineNumber(pragma_loc);
+  
+  if (spelling_line != expansion_line) {
+    std::cout << "  Note: Line number mismatch due to preprocessor (spelling: " 
+             << spelling_line << ", expansion: " << expansion_line << ")\n";
+  }
+  
+  // Use spelling line number for accurate source location
+  unsigned line = spelling_line;
   unsigned col = getColumnNumber(pragma_loc);
   
   PragmaInsertionPoint point(pragma_loc, line, col, loop.loop_type,
@@ -50,8 +60,34 @@ SourceLocation PragmaLocationMapper::findPragmaInsertionLocation(Stmt* loop_stmt
     return SourceLocation();
   }
   
+  // Handle macro expansions and preprocessor issues
+  if (loop_start.isMacroID()) {
+    // Get the spelling location (where the text actually appears)
+    loop_start = source_manager_->getSpellingLoc(loop_start);
+    
+    if (loop_start.isInvalid()) {
+      std::cout << "  Warning: Could not resolve macro expansion location\n";
+      return SourceLocation();
+    }
+  }
+  
   // Try to move to the beginning of the line containing the loop
   SourceLocation line_start = moveToStartOfLine(loop_start);
+  
+  // Check if there are preprocessor directives on the line before
+  // If so, we need to insert after them
+  unsigned line_num = source_manager_->getSpellingLineNumber(line_start);
+  if (line_num > 1) {
+    // Check the previous line for preprocessor directives
+    SourceLocation prev_line = source_manager_->translateLineCol(
+        source_manager_->getFileID(line_start), line_num - 1, 1);
+    
+    if (prev_line.isValid()) {
+      // For now, use the current line start
+      // A more sophisticated approach would parse preprocessor directives
+      return line_start;
+    }
+  }
   
   return line_start;
 }
@@ -81,6 +117,9 @@ std::string PragmaLocationMapper::getIndentationAtLocation(SourceLocation loc) {
   // Get the line start and read characters until we hit non-whitespace
   SourceLocation line_start = moveToStartOfLine(loc);
   
+  // This is a simplified approach. A real implementation would
+  // read the source file and analyze the actual indentation
+  
   // For now, return a reasonable default indentation
   return "    "; // 4 spaces
 }
@@ -89,6 +128,9 @@ SourceLocation PragmaLocationMapper::moveToStartOfLine(SourceLocation loc) {
   if (loc.isInvalid()) {
     return loc;
   }
+
+  // For now, we'll use the given location as a reasonable approximation
+  // In practice, Clang's Lexer class has better methods for this
   
   unsigned line = source_manager_->getSpellingLineNumber(loc);
   FileID file_id = source_manager_->getFileID(loc);
