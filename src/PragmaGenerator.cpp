@@ -33,12 +33,18 @@ void PragmaGenerator::generatePragmasForLoops(const std::vector<LoopInfo>& loops
         pragma.pragma_text += ")";
       }
       
+      // Calculate confidence score
+      pragma.confidence = confidence_scorer_->calculateConfidence(loop, pragma);
+      
       generated_pragmas_.push_back(pragma);
       
       std::cout << "  Generated pragma for " << loop.loop_type 
                << " loop at line " << loop.line_number << ":\n";
       std::cout << "    " << pragma.pragma_text << "\n";
       std::cout << "    Reasoning: " << reasoning << "\n";
+      std::cout << "    Confidence: " << confidence_scorer_->getConfidenceDescription(pragma.confidence.level)
+               << " (" << static_cast<int>(pragma.confidence.numerical_score * 100) << "%)\n";
+      std::cout << "    " << pragma.confidence.reasoning << "\n";
     } else {
       std::cout << "  No pragma generated for " << loop.loop_type 
                << " loop at line " << loop.line_number 
@@ -187,6 +193,7 @@ void PragmaGenerator::printPragmaSummary() const {
   int parallel_for_count = 0;
   int parallel_for_simd_count = 0;
   int simd_count = 0;
+  double avg_confidence = 0.0;
   
   for (const auto& pragma : generated_pragmas_) {
     switch (pragma.type) {
@@ -203,17 +210,25 @@ void PragmaGenerator::printPragmaSummary() const {
         break;
     }
     
+    avg_confidence += pragma.confidence.numerical_score;
+    
     std::cout << "Line " << pragma.line_number << ": " << pragma.pragma_text;
     if (pragma.requires_private_vars) {
       std::cout << " (with private variables)";
     }
-    std::cout << "\n";
+    std::cout << " [Confidence: " 
+             << confidence_scorer_->getConfidenceDescription(pragma.confidence.level) << "]\n";
+  }
+  
+  if (!generated_pragmas_.empty()) {
+    avg_confidence /= generated_pragmas_.size();
   }
   
   std::cout << "\nBreakdown:\n";
   std::cout << "  #pragma omp parallel for: " << parallel_for_count << "\n";
   std::cout << "  #pragma omp parallel for simd: " << parallel_for_simd_count << "\n";
   std::cout << "  #pragma omp simd: " << simd_count << "\n";
+  std::cout << "  Average confidence: " << static_cast<int>(avg_confidence * 100) << "%\n";
   std::cout << "================================\n";
 }
 

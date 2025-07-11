@@ -32,6 +32,7 @@ add_executable(statik
     src/PragmaLocationMapper.cpp
     src/PragmaGenerator.cpp
     src/SourceAnnotator.cpp
+    src/ConfidenceScorer.cpp
 )
 
 target_link_libraries(statik

@@ -1,50 +1,61 @@
 #pragma once
 
-#include "clang/AST/Stmt.h"
-#include "clang/Basic/SourceLocation.h"
-#include "clang/Basic/SourceManager.h"
 #include "analyzer/LoopInfo.h"
+#include "analyzer/PragmaLocationMapper.h"
+#include "analyzer/ConfidenceScorer.h"
 #include <string>
 #include <vector>
+#include <memory>
 
 namespace statik {
 
-struct PragmaInsertionPoint {
-  clang::SourceLocation location;
-  unsigned line_number;
-  unsigned column_number;
-  std::string loop_type;        // "for", "while", "do-while"
-  bool is_nested;              // true if this is a nested loop
-  unsigned nesting_depth;
-  std::string suggested_pragma; // The actual pragma text to insert
-  
-  PragmaInsertionPoint(clang::SourceLocation loc, unsigned line, unsigned col,
-                      const std::string& type, bool nested, unsigned depth)
-      : location(loc), line_number(line), column_number(col), 
-        loop_type(type), is_nested(nested), nesting_depth(depth) {}
+enum class PragmaType {
+  PARALLEL_FOR,       // #pragma omp parallel for
+  PARALLEL_FOR_SIMD,  // #pragma omp parallel for simd
+  SIMD,              // #pragma omp simd
+  NO_PRAGMA          // Loop not suitable for parallelization
 };
 
-class PragmaLocationMapper {
-public:
-  explicit PragmaLocationMapper(clang::SourceManager* source_manager)
-      : source_manager_(source_manager) {}
+struct GeneratedPragma {
+  PragmaType type;
+  std::string pragma_text;
+  std::string loop_type;
+  unsigned line_number;
+  std::string reasoning;
+  bool requires_private_vars;
+  std::vector<std::string> private_variables;
+  ConfidenceScore confidence;
   
-  void mapLoopToPragmaLocation(const LoopInfo& loop);
-  const std::vector<PragmaInsertionPoint>& getInsertionPoints() const { 
-    return insertion_points_; 
+  GeneratedPragma(PragmaType pragma_type, const std::string& text, 
+                 const std::string& loop, unsigned line, const std::string& reason)
+      : type(pragma_type), pragma_text(text), loop_type(loop), 
+        line_number(line), reasoning(reason), requires_private_vars(false) {}
+};
+
+class PragmaGenerator {
+public:
+  PragmaGenerator() : confidence_scorer_(std::make_unique<ConfidenceScorer>()) {}
+  
+  void generatePragmasForLoops(const std::vector<LoopInfo>& loops);
+  const std::vector<GeneratedPragma>& getGeneratedPragmas() const { 
+    return generated_pragmas_; 
   }
   
-  void clearInsertionPoints() { insertion_points_.clear(); }
+  void clearPragmas() { generated_pragmas_.clear(); }
+  void printPragmaSummary() const;
   
 private:
-  clang::SourceManager* source_manager_;
-  std::vector<PragmaInsertionPoint> insertion_points_;
+  std::vector<GeneratedPragma> generated_pragmas_;
+  std::unique_ptr<ConfidenceScorer> confidence_scorer_;
   
-  clang::SourceLocation findPragmaInsertionLocation(clang::Stmt* loop_stmt);
-  unsigned getColumnNumber(clang::SourceLocation loc);
-  bool isLocationInMacro(clang::SourceLocation loc);
-  std::string getIndentationAtLocation(clang::SourceLocation loc);
-  clang::SourceLocation moveToStartOfLine(clang::SourceLocation loc);
+  PragmaType determinePragmaType(const LoopInfo& loop);
+  std::string generatePragmaText(PragmaType type, const LoopInfo& loop);
+  std::string generateReasoning(PragmaType type, const LoopInfo& loop);
+  
+  bool shouldUseSimd(const LoopInfo& loop);
+  bool hasSimpleArrayAccess(const LoopInfo& loop);
+  bool isInnerLoop(const LoopInfo& loop);
+  std::vector<std::string> identifyPrivateVariables(const LoopInfo& loop);
 };
 
 } // namespace statik
