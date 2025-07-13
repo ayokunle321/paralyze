@@ -117,7 +117,7 @@ std::string PragmaLocationMapper::getIndentationAtLocation(SourceLocation loc) {
   // Get the line start and read characters until we hit non-whitespace
   SourceLocation line_start = moveToStartOfLine(loc);
   
-  // This is a simplified approach. A real implementation would
+  // This is a simplified approach - a real implementation would
   // read the source file and analyze the actual indentation
   
   // For now, return a reasonable default indentation
@@ -128,10 +128,9 @@ SourceLocation PragmaLocationMapper::moveToStartOfLine(SourceLocation loc) {
   if (loc.isInvalid()) {
     return loc;
   }
-
+  
   // For now, we'll use the given location as a reasonable approximation
   // In practice, Clang's Lexer class has better methods for this
-  
   unsigned line = source_manager_->getSpellingLineNumber(loc);
   FileID file_id = source_manager_->getFileID(loc);
   
