@@ -1,11 +1,12 @@
 #pragma once
-
 #include "clang/AST/Expr.h"
 #include "clang/AST/ASTContext.h"
 #include "analyzer/ArrayAccess.h"
 #include "analyzer/LoopInfo.h"
+#include "analyzer/CrossIterationAnalyzer.h"
 #include <string>
 #include <vector>
+#include <memory>
 
 namespace statik {
 
@@ -27,13 +28,15 @@ struct ArrayDependency {
   ArrayDependency(const std::string& array, ArrayDependencyType dep_type,
                  unsigned src_line, unsigned sink_line,
                  const std::string& src_idx, const std::string& sink_idx)
-      : array_name(array), type(dep_type), source_line(src_line), 
+      : array_name(array), type(dep_type), source_line(src_line),
         sink_line(sink_line), source_index(src_idx), sink_index(sink_idx) {}
 };
 
 class ArrayDependencyAnalyzer {
 public:
-  explicit ArrayDependencyAnalyzer(clang::ASTContext* context) : context_(context) {}
+  explicit ArrayDependencyAnalyzer(clang::ASTContext* context) 
+      : context_(context), 
+        cross_iteration_analyzer_(std::make_unique<CrossIterationAnalyzer>(context)) {}
   
   void analyzeArrayDependencies(LoopInfo& loop);
   bool hasArrayDependencies(const LoopInfo& loop) const;
@@ -41,6 +44,7 @@ public:
 private:
   clang::ASTContext* context_;
   std::vector<ArrayDependency> detected_dependencies_;
+  std::unique_ptr<CrossIterationAnalyzer> cross_iteration_analyzer_;
   
   ArrayDependencyType compareArrayIndices(clang::Expr* index1, clang::Expr* index2,
                                         const std::string& induction_var);

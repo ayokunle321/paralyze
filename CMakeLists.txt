@@ -26,9 +26,9 @@ add_executable(statik
     src/DependencyAnalyzer.cpp
     src/DependencyManager.cpp
     src/ArrayDependencyAnalyzer.cpp
+    src/CrossIterationAnalyzer.cpp
     src/PointerAnalyzer.cpp
     src/FunctionCallAnalyzer.cpp
-    src/CrossIterationAnalyzer.cpp
     src/PragmaLocationMapper.cpp
     src/PragmaGenerator.cpp
     src/SourceAnnotator.cpp
