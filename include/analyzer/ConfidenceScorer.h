@@ -1,10 +1,14 @@
 #pragma once
 
-#include "analyzer/LoopInfo.h"
-#include "analyzer/PragmaGenerator.h"
 #include <string>
+#include <vector>
 
 namespace statik {
+
+// Forward declarations to avoid circular dependencies
+struct LoopInfo;
+struct GeneratedPragma;
+enum class PragmaType;
 
 enum class ConfidenceLevel {
   VERY_LOW = 1,    // 0-20% confident

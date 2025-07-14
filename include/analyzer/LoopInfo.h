@@ -11,7 +11,7 @@
 
 namespace statik {
 
-// Forward declaration
+// Forward declarations to break circular dependencies
 struct Dependency;
 
 struct LoopInfo {
@@ -19,15 +19,15 @@ struct LoopInfo {
   clang::SourceLocation location;
   unsigned line_number;
   std::string loop_type; // "for", "while", "do-while"
-
+  
   // Nesting information
-  unsigned depth;        // 0 = outermost, 1 = nested once, etc.
+  unsigned depth; // 0 = outermost, 1 = nested once, etc.
   LoopInfo* parent_loop; // nullptr if outermost
   std::vector<LoopInfo*> child_loops;
-
+  
   // Array access patterns within this loop
   std::vector<ArrayAccess> array_accesses;
-
+  
   // Loop bounds information
   LoopBounds bounds;
   
@@ -40,17 +40,17 @@ struct LoopInfo {
   // Dependency information
   std::vector<Dependency> dependencies;
   bool has_dependencies;
-
+  
   LoopInfo(clang::Stmt* s, clang::SourceLocation loc, unsigned line,
-           const std::string& type)
+          const std::string& type)
       : stmt(s), location(loc), line_number(line), loop_type(type), depth(0),
         parent_loop(nullptr), has_dependencies(false) {}
-
+  
   void addArrayAccess(const ArrayAccess& access) {
     array_accesses.push_back(access);
     metrics.memory_accesses++; // Count array access as memory operation
   }
-
+  
   void setParent(LoopInfo* parent) {
     parent_loop = parent;
     if (parent) {
@@ -82,7 +82,7 @@ struct LoopInfo {
   void setHasDependencies(bool deps) {
     has_dependencies = deps;
   }
-
+  
   bool isOutermost() const { return depth == 0; }
   bool isHot() const { return metrics.hotness_score > 10.0; }
   bool isParallelizable() const { return !has_dependencies; }

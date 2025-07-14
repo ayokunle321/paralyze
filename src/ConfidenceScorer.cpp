@@ -1,4 +1,6 @@
 #include "analyzer/ConfidenceScorer.h"
+#include "analyzer/LoopInfo.h"
+#include "analyzer/PragmaGenerator.h"
 #include <algorithm>
 #include <cmath>
 
