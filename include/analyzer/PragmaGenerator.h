@@ -2,8 +2,10 @@
 
 #include "analyzer/LoopInfo.h"
 #include "analyzer/PragmaLocationMapper.h"
+#include "analyzer/ConfidenceScorer.h"
 #include <string>
 #include <vector>
+#include <memory>
 
 namespace statik {
 
@@ -22,6 +24,7 @@ struct GeneratedPragma {
   std::string reasoning;
   bool requires_private_vars;
   std::vector<std::string> private_variables;
+  ConfidenceScore confidence;
   
   GeneratedPragma(PragmaType pragma_type, const std::string& text, 
                  const std::string& loop, unsigned line, const std::string& reason)
@@ -31,7 +34,7 @@ struct GeneratedPragma {
 
 class PragmaGenerator {
 public:
-  PragmaGenerator() = default;
+  PragmaGenerator() : confidence_scorer_(std::make_unique<ConfidenceScorer>()) {}
   
   void generatePragmasForLoops(const std::vector<LoopInfo>& loops);
   const std::vector<GeneratedPragma>& getGeneratedPragmas() const { 
@@ -43,6 +46,7 @@ public:
   
 private:
   std::vector<GeneratedPragma> generated_pragmas_;
+  std::unique_ptr<ConfidenceScorer> confidence_scorer_;
   
   PragmaType determinePragmaType(const LoopInfo& loop);
   std::string generatePragmaText(PragmaType type, const LoopInfo& loop);
