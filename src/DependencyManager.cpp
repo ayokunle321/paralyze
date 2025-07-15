@@ -1,11 +1,18 @@
 #include "analyzer/DependencyManager.h"
+#include "analyzer/LoopInfo.h"
+#include "analyzer/ArrayDependencyAnalyzer.h"
+#include "analyzer/PointerAnalyzer.h"
+#include "analyzer/FunctionCallAnalyzer.h"
+#include "analyzer/PragmaLocationMapper.h"
+#include "analyzer/PragmaGenerator.h"
+#include "analyzer/SourceAnnotator.h"
 #include <iostream>
 
 using namespace clang;
 
 namespace statik {
 
-DependencyManager::DependencyManager(ASTContext* context) 
+DependencyManager::DependencyManager(ASTContext* context)
     : context_(context),
       array_analyzer_(std::make_unique<ArrayDependencyAnalyzer>(context)),
       pointer_analyzer_(std::make_unique<PointerAnalyzer>(context)),

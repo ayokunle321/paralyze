@@ -1,17 +1,20 @@
 #pragma once
 
 #include "clang/AST/ASTContext.h"
-#include "analyzer/LoopInfo.h"
-#include "analyzer/ArrayDependencyAnalyzer.h"
-#include "analyzer/PointerAnalyzer.h"
-#include "analyzer/FunctionCallAnalyzer.h"
-#include "analyzer/PragmaLocationMapper.h"
-#include "analyzer/PragmaGenerator.h"
-#include "analyzer/SourceAnnotator.h"
-#include <memory>
+#include <string>
 #include <vector>
+#include <memory>
 
 namespace statik {
+
+// Forward declarations to avoid circular dependencies
+struct LoopInfo;
+class ArrayDependencyAnalyzer;
+class PointerAnalyzer;
+class FunctionCallAnalyzer;
+class PragmaLocationMapper;
+class PragmaGenerator;
+class SourceAnnotator;
 
 // Central manager for all dependency analysis components
 class DependencyManager {
