@@ -48,6 +48,7 @@ private:
   
   bool isPointerType(clang::QualType type);
   std::string extractPointerName(clang::Expr* expr);
+  std::string extractPointerNameRecursive(clang::Expr* expr, int depth);
   void recordPointerOperation(const std::string& name, clang::SourceLocation loc,
                             bool deref, bool addr, bool arith);
   bool hasComplexPointerArithmetic() const;

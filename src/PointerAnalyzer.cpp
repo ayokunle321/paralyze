@@ -171,43 +171,44 @@ std::string PointerAnalyzer::extractPointerName(Expr* expr) {
     return "";
   }
   
-  // Add safety check to prevent infinite recursion
-  static int recursion_depth = 0;
-  if (recursion_depth > 10) {
+  // Use instance method with recursion limit to prevent infinite loops
+  return extractPointerNameRecursive(expr, 0);
+}
+
+std::string PointerAnalyzer::extractPointerNameRecursive(Expr* expr, int depth) {
+  // Prevent infinite recursion
+  if (depth > 10) {
     return "complex_expr";
   }
   
-  recursion_depth++;
+  if (!expr) {
+    return "";
+  }
   
   expr = expr->IgnoreParenImpCasts();
   
-  std::string result;
-  
   if (auto* declRef = dyn_cast<DeclRefExpr>(expr)) {
-    result = declRef->getDecl()->getNameAsString();
+    return declRef->getDecl()->getNameAsString();
   } else if (auto* arrayExpr = dyn_cast<ArraySubscriptExpr>(expr)) {
-    result = extractPointerName(arrayExpr->getBase());
+    return extractPointerNameRecursive(arrayExpr->getBase(), depth + 1);
   } else if (auto* binOp = dyn_cast<BinaryOperator>(expr)) {
     // Handle pointer arithmetic like ptr + offset
     if (binOp->getOpcode() == BO_Add || binOp->getOpcode() == BO_Sub) {
-      std::string lhs = extractPointerName(binOp->getLHS());
+      std::string lhs = extractPointerNameRecursive(binOp->getLHS(), depth + 1);
       if (!lhs.empty() && lhs != "complex_expr") {
-        result = lhs + "_offset";
+        return lhs + "_offset";
       } else {
-        result = "complex_expr";
+        return "complex_expr";
       }
     } else {
-      result = "complex_expr";
+      return "complex_expr";
     }
   } else if (auto* unaryOp = dyn_cast<UnaryOperator>(expr)) {
     // Handle unary operations like *ptr, &var
-    result = extractPointerName(unaryOp->getSubExpr());
+    return extractPointerNameRecursive(unaryOp->getSubExpr(), depth + 1);
   } else {
-    result = "complex_expr";
+    return "complex_expr";
   }
-  
-  recursion_depth--;
-  return result;
 }
 
 void PointerAnalyzer::recordPointerOperation(const std::string& name, 
