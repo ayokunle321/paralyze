@@ -33,8 +33,15 @@ void PragmaGenerator::generatePragmasForLoops(const std::vector<LoopInfo>& loops
         pragma.pragma_text += ")";
       }
       
-      // Calculate confidence score
-      pragma.confidence = confidence_scorer_->calculateConfidence(loop, pragma);
+      // Calculate confidence score BEFORE adding to vector
+      if (confidence_scorer_) {
+        pragma.confidence = confidence_scorer_->calculateConfidence(loop, pragma);
+      } else {
+        // Fallback if confidence scorer is not initialized
+        pragma.confidence.numerical_score = 0.5;
+        pragma.confidence.level = ConfidenceLevel::MEDIUM;
+        pragma.confidence.reasoning = "Confidence scorer not available";
+      }
       
       generated_pragmas_.push_back(pragma);
       
@@ -42,9 +49,12 @@ void PragmaGenerator::generatePragmasForLoops(const std::vector<LoopInfo>& loops
                << " loop at line " << loop.line_number << ":\n";
       std::cout << "    " << pragma.pragma_text << "\n";
       std::cout << "    Reasoning: " << reasoning << "\n";
-      std::cout << "    Confidence: " << confidence_scorer_->getConfidenceDescription(pragma.confidence.level)
-               << " (" << static_cast<int>(pragma.confidence.numerical_score * 100) << "%)\n";
-      std::cout << "    " << pragma.confidence.reasoning << "\n";
+      
+      if (confidence_scorer_) {
+        std::cout << "    Confidence: " << confidence_scorer_->getConfidenceDescription(pragma.confidence.level)
+                 << " (" << static_cast<int>(pragma.confidence.numerical_score * 100) << "%)\n";
+        std::cout << "    " << pragma.confidence.reasoning << "\n";
+      }
     } else {
       std::cout << "  No pragma generated for " << loop.loop_type 
                << " loop at line " << loop.line_number 
@@ -216,8 +226,13 @@ void PragmaGenerator::printPragmaSummary() const {
     if (pragma.requires_private_vars) {
       std::cout << " (with private variables)";
     }
-    std::cout << " [Confidence: " 
-             << confidence_scorer_->getConfidenceDescription(pragma.confidence.level) << "]\n";
+    
+    if (confidence_scorer_) {
+      std::cout << " [Confidence: " 
+               << confidence_scorer_->getConfidenceDescription(pragma.confidence.level) << "]\n";
+    } else {
+      std::cout << " [Confidence: N/A]\n";
+    }
   }
   
   if (!generated_pragmas_.empty()) {
