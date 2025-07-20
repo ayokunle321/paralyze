@@ -1,6 +1,8 @@
 #include "analyzer/LoopVisitor.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/Stmt.h"
+#include "clang/AST/ParentMapContext.h"
+#include "analyzer/FunctionCallAnalyzer.h"
 #include <iostream>
 
 using namespace clang;
@@ -189,43 +191,77 @@ bool LoopVisitor::VisitUnaryOperator(UnaryOperator* unaryOp) {
 }
 
 bool LoopVisitor::VisitCallExpr(CallExpr* callExpr) {
-  if (!callExpr || !isInsideLoop()) {
+    if (!callExpr || !isInsideLoop()) {
+        return true;
+    }
+    
+    LoopInfo* currentLoop = getCurrentLoop();
+    currentLoop->incrementFunctionCalls();
+    
+    std::cout << " Function call at line "
+              << context_->getSourceManager().getSpellingLineNumber(callExpr->getBeginLoc())
+              << "\n";
+    
+    // Analyze the function call and store the result in LoopInfo
+    FunctionCallAnalyzer temp_analyzer(context_);
+    temp_analyzer.visitCallExpr(callExpr, *currentLoop);
+    
+    // Extract the function name and safety info
+    std::string func_name;
+    if (auto* funcDecl = callExpr->getDirectCallee()) {
+        if (funcDecl->getDeclName().isIdentifier()) {
+            func_name = funcDecl->getNameAsString();
+        }
+    }
+    
+    if (func_name.empty()) {
+        func_name = "unknown_function";
+    }
+    
+    // Check if it's safe using the same logic as FunctionCallAnalyzer
+    bool is_safe = true;
+    static const std::set<std::string> unsafe_functions = {
+        "printf", "fprintf", "sprintf", "puts", "putchar",
+        "scanf", "fscanf", "sscanf", "getchar", "gets", "fgets",
+        "malloc", "calloc", "realloc", "free",
+        "fopen", "fclose", "fread", "fwrite", "fseek", "ftell",
+        "exit", "abort", "system", "rand", "srand", "time"
+    };
+    
+    if (unsafe_functions.find(func_name) != unsafe_functions.end()) {
+        is_safe = false;
+    }
+    
+    // Store in LoopInfo
+    currentLoop->addDetectedFunctionCall(func_name, is_safe);
+    
     return true;
-  }
-  
-  getCurrentLoop()->incrementFunctionCalls();
-  
-  std::cout << "  Function call at line " 
-            << context_->getSourceManager().getSpellingLineNumber(callExpr->getBeginLoc()) 
-            << "\n";
-  
-  return true;
 }
 
 void LoopVisitor::analyzeForLoopBounds(ForStmt* forLoop, LoopInfo& info) {
-  info.bounds.init_expr = forLoop->getInit();
-  info.bounds.condition_expr = forLoop->getCond();
-  info.bounds.increment_expr = forLoop->getInc();
-
-  // Try to extract iterator variable name from initialization
-  if (auto* declStmt = dyn_cast_or_null<DeclStmt>(forLoop->getInit())) {
-    if (declStmt->isSingleDecl()) {
-      if (auto* varDecl = dyn_cast<VarDecl>(declStmt->getSingleDecl())) {
-        info.bounds.iterator_var = varDecl->getNameAsString();
-      }
+    info.bounds.init_expr = nullptr;
+    info.bounds.condition_expr = forLoop->getCond();
+    info.bounds.increment_expr = forLoop->getInc();
+    
+    // Try to extract iterator variable name from initialization
+    if (auto* declStmt = dyn_cast_or_null<DeclStmt>(forLoop->getInit())) {
+        if (declStmt->isSingleDecl()) {
+            if (auto* varDecl = dyn_cast<VarDecl>(declStmt->getSingleDecl())) {
+                info.bounds.iterator_var = varDecl->getNameAsString();
+            }
+        }
     }
-  }
-
-  // Check for simple pattern
-  if (!info.bounds.iterator_var.empty() && info.bounds.condition_expr &&
-      info.bounds.increment_expr) {
-    info.bounds.is_simple_pattern = true;
-  }
-
-  if (info.bounds.is_simple_pattern) {
-    std::cout << "  Simple iterator pattern detected: "
-              << info.bounds.iterator_var << " (depth " << info.depth << ")\n";
-  }
+    
+    // Check for simple pattern
+    if (!info.bounds.iterator_var.empty() && info.bounds.condition_expr &&
+        info.bounds.increment_expr) {
+        info.bounds.is_simple_pattern = true;
+    }
+    
+    if (info.bounds.is_simple_pattern) {
+        std::cout << " Simple iterator pattern detected: "
+                  << info.bounds.iterator_var << " (depth " << info.depth << ")\n";
+    }
 }
 
 void LoopVisitor::markInductionVariable(LoopInfo& loop) {
@@ -247,23 +283,62 @@ void LoopVisitor::finalizeDependencyAnalysis(LoopInfo& loop) {
 }
 
 bool LoopVisitor::VisitArraySubscriptExpr(ArraySubscriptExpr* arrayExpr) {
-  if (!arrayExpr || !isInsideLoop()) {
+    if (!arrayExpr || !isInsideLoop()) {
+        return true;
+    }
+    
+    const std::string arrayName = extractArrayBaseName(arrayExpr);
+    SourceLocation loc = arrayExpr->getExprLoc();
+    SourceManager& sm = context_->getSourceManager();
+    unsigned line = sm.getSpellingLineNumber(loc);
+    
+    // Determine if this is a write access by checking parent context
+    bool is_write = false;
+    auto parents = context_->getParents(*arrayExpr);
+    for (const auto& parent : parents) {
+        if (auto* binaryOp = parent.get<BinaryOperator>()) {
+            // Check if this array access is the LHS of an assignment
+            if (binaryOp->isAssignmentOp() && binaryOp->getLHS() == arrayExpr) {
+                is_write = true;
+                break;
+            }
+        }
+    }
+    
+    // Create ArrayAccess with proper write/read flag and subscript
+    ArrayAccess access(arrayName, arrayExpr->getIdx(), loc, line, is_write);
+    getCurrentLoop()->addArrayAccess(access);
+    
+    // Show the actual subscript expression for debugging
+    std::string subscript_str = "unknown";
+    if (arrayExpr->getIdx()) {
+        // Use the same exprToString logic as ArrayDependencyAnalyzer
+        Expr* idx = arrayExpr->getIdx()->IgnoreParenImpCasts();
+        if (auto* declRef = dyn_cast<DeclRefExpr>(idx)) {
+            subscript_str = declRef->getDecl()->getNameAsString();
+        } else if (auto* binOp = dyn_cast<BinaryOperator>(idx)) {
+            // Handle expressions like i-1, i+1
+            if (auto* lhs = dyn_cast<DeclRefExpr>(binOp->getLHS())) {
+                if (auto* rhs = dyn_cast<IntegerLiteral>(binOp->getRHS())) {
+                    std::string var = lhs->getDecl()->getNameAsString();
+                    int constant = rhs->getValue().getSExtValue();
+                    if (binOp->getOpcode() == BO_Add) {
+                        subscript_str = var + "+" + std::to_string(constant);
+                    } else if (binOp->getOpcode() == BO_Sub) {
+                        subscript_str = var + "-" + std::to_string(constant);
+                    }
+                }
+            }
+        } else if (auto* intLit = dyn_cast<IntegerLiteral>(idx)) {
+            subscript_str = std::to_string(intLit->getValue().getSExtValue());
+        }
+    }
+    
+    std::cout << " Found array access: " << arrayName << "[" << subscript_str << "] at line " << line
+              << " (" << (is_write ? "WRITE" : "READ") << ")"
+              << " (depth " << getCurrentLoop()->depth << ")\n";
+    
     return true;
-  }
-
-  const std::string arrayName = extractArrayBaseName(arrayExpr);
-
-  SourceLocation loc = arrayExpr->getExprLoc();
-  SourceManager& sm = context_->getSourceManager();
-  unsigned line = sm.getSpellingLineNumber(loc);
-
-  ArrayAccess access(arrayName, arrayExpr->getIdx(), loc, line, false);
-  getCurrentLoop()->addArrayAccess(access);
-
-  std::cout << "  Found array access: " << arrayName << "[] at line " << line
-            << " (depth " << getCurrentLoop()->depth << ")\n";
-
-  return true;
 }
 
 std::string LoopVisitor::extractArrayBaseName(ArraySubscriptExpr* arrayExpr) {

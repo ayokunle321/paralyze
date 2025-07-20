@@ -1,5 +1,6 @@
 #include "analyzer/PointerAnalyzer.h"
 #include "clang/AST/Type.h"
+#include "clang/Basic/SourceManager.h"
 #include <iostream>
 
 using namespace clang;

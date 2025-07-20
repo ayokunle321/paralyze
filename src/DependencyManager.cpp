@@ -7,6 +7,7 @@
 #include "analyzer/PragmaGenerator.h"
 #include "analyzer/SourceAnnotator.h"
 #include <iostream>
+#include <stdexcept>
 
 using namespace clang;
 

@@ -1,4 +1,4 @@
-// Quick validation tests for dependency analysis
+#include <stdlib.h>
 
 // Should be SAFE
 void safe_example() {

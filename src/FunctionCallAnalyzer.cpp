@@ -1,5 +1,6 @@
 #include "analyzer/FunctionCallAnalyzer.h"
 #include "clang/AST/Decl.h"
+#include "clang/Basic/SourceManager.h" 
 #include <iostream>
 #include <algorithm>
 
@@ -33,24 +34,20 @@ void FunctionCallAnalyzer::analyzeFunctionCalls(LoopInfo& loop) {
 }
 
 FunctionCallSafety FunctionCallAnalyzer::getFunctionCallSafety(const LoopInfo& loop) const {
-  if (function_calls_.empty()) {
+  // Check the stored function call info in LoopInfo
+  if (loop.detected_function_calls.empty()) {
     return FunctionCallSafety::SAFE;
   }
   
-  bool has_unsafe_calls = false;
-  bool has_potentially_safe_calls = false;
-  
-  for (const auto& call : function_calls_) {
-    if (call.has_side_effects) {
-      has_unsafe_calls = true;
-    } else if (call.is_math_function || call.is_builtin) {
-      has_potentially_safe_calls = true;
-    }
+  // Check the stored safety flags
+  if (loop.hasUnsafeFunctionCalls()) {
+    return FunctionCallSafety::UNSAFE;
   }
   
-  if (has_unsafe_calls) {
-    return FunctionCallSafety::UNSAFE;
-  } else if (has_potentially_safe_calls) {
+  // If we have function calls but they're all safe, check if they're math functions
+  bool has_potentially_safe_calls = !loop.detected_function_calls.empty();
+  
+  if (has_potentially_safe_calls) {
     return FunctionCallSafety::POTENTIALLY_SAFE;
   }
   
