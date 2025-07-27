@@ -26,7 +26,9 @@ DependencyManager::DependencyManager(ASTContext* context)
 void DependencyManager::analyzeLoop(LoopInfo& loop) {
   warnings_.clear();
   
-  std::cout << "=== Dependency Analysis for Loop at Line " << loop.line_number << " ===\n";
+  if (verbose_) {
+    std::cout << "\n=== Dependency Analysis for Loop at Line " << loop.line_number << " ===\n";
+  }
   
   try {
     runScalarAnalysis(loop);
@@ -38,19 +40,21 @@ void DependencyManager::analyzeLoop(LoopInfo& loop) {
     bool is_safe = isLoopParallelizable(loop);
     loop.setHasDependencies(!is_safe);
     
-    std::cout << "\n--- Final Decision ---\n";
-    if (is_safe) {
-      std::cout << "Loop is SAFE for parallelization\n";
-    } else {
-      std::cout << "Loop is UNSAFE for parallelization\n";
-      if (!warnings_.empty()) {
-        std::cout << "Reasons:\n";
-        for (const auto& warning : warnings_) {
-          std::cout << "  - " << warning << "\n";
+    if (verbose_) {
+      std::cout << "\n--- Final Decision ---\n";
+      if (is_safe) {
+        std::cout << "Loop is SAFE for parallelization\n";
+      } else {
+        std::cout << "Loop is UNSAFE for parallelization\n";
+        if (!warnings_.empty()) {
+          std::cout << "Reasons:\n";
+          for (const auto& warning : warnings_) {
+            std::cout << "  - " << warning << "\n";
+          }
         }
       }
+      std::cout << "========================\n\n";
     }
-    std::cout << "========================\n\n";
     
   } catch (const std::exception& e) {
     recordWarning("Analysis failed with exception: " + std::string(e.what()));
@@ -67,7 +71,9 @@ bool DependencyManager::isLoopParallelizable(const LoopInfo& loop) const {
 }
 
 void DependencyManager::runScalarAnalysis(LoopInfo& loop) {
-  std::cout << "\n--- Scalar Variable Analysis ---\n";
+  if (verbose_) {
+    std::cout << "\n--- Scalar Variable Analysis ---\n";
+  }
   
   bool found_scalar_deps = false;
   
@@ -75,30 +81,41 @@ void DependencyManager::runScalarAnalysis(LoopInfo& loop) {
     const auto& var = var_pair.second;
     
     if (var.isInductionVariable()) {
-      std::cout << "  " << var.name << ": INDUCTION VARIABLE (safe)\n";
+      if (verbose_) {
+        std::cout << "  " << var.name << ": INDUCTION VARIABLE (safe)\n";
+      }
       continue;
     }
     
     if (var.hasReads() && var.hasWrites()) {
-      std::cout << "  " << var.name << ": READ+WRITE dependency detected\n";
+      if (verbose_) {
+        std::cout << "  " << var.name << ": READ+WRITE dependency detected\n";
+      }
       recordWarning("Scalar variable '" + var.name + "' has read-after-write dependency");
       found_scalar_deps = true;
     } else if (var.hasWrites()) {
-      std::cout << "  " << var.name << ": WRITE-ONLY (safe)\n";
+      if (verbose_) {
+        std::cout << "  " << var.name << ": WRITE-ONLY (safe)\n";
+      }
     } else if (var.hasReads()) {
-      std::cout << "  " << var.name << ": READ-ONLY (safe)\n";
+      if (verbose_) {
+        std::cout << "  " << var.name << ": READ-ONLY (safe)\n";
+      }
     }
   }
   
-  if (!found_scalar_deps) {
+  if (verbose_ && !found_scalar_deps) {
     std::cout << "  No scalar dependencies detected\n";
   }
 }
 
 void DependencyManager::runArrayAnalysis(LoopInfo& loop) {
-  std::cout << "\n--- Array Dependency Analysis ---\n";
+  if (verbose_) {
+    std::cout << "\n--- Array Dependency Analysis ---\n";
+  }
   
   try {
+    array_analyzer_->setVerbose(verbose_);
     array_analyzer_->analyzeArrayDependencies(loop);
     
     if (array_analyzer_->hasArrayDependencies(loop)) {
@@ -110,7 +127,9 @@ void DependencyManager::runArrayAnalysis(LoopInfo& loop) {
 }
 
 void DependencyManager::runPointerAnalysis(LoopInfo& loop) {
-  std::cout << "\n--- Pointer Analysis ---\n";
+  if (verbose_) {
+    std::cout << "\n--- Pointer Analysis ---\n";
+  }
   
   try {
     pointer_analyzer_->analyzePointerUsage(loop);
@@ -133,7 +152,9 @@ void DependencyManager::runPointerAnalysis(LoopInfo& loop) {
 }
 
 void DependencyManager::runFunctionAnalysis(LoopInfo& loop) {
-  std::cout << "\n--- Function Call Analysis ---\n";
+  if (verbose_) {
+    std::cout << "\n--- Function Call Analysis ---\n";
+  }
   
   try {
     function_analyzer_->analyzeFunctionCalls(loop);
@@ -144,7 +165,9 @@ void DependencyManager::runFunctionAnalysis(LoopInfo& loop) {
         recordWarning("Function calls with side effects detected");
         break;
       case FunctionCallSafety::POTENTIALLY_SAFE:
-        std::cout << "  Math functions detected (potentially safe)\n";
+        if (verbose_) {
+          std::cout << "  Math functions detected (potentially safe)\n";
+        }
         break;
       case FunctionCallSafety::SAFE:
         // No warning needed

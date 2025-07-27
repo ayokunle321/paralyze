@@ -31,10 +31,12 @@ struct PointerOperation {
 
 class PointerAnalyzer {
 public:
-  explicit PointerAnalyzer(clang::ASTContext* context) : context_(context) {}
+  explicit PointerAnalyzer(clang::ASTContext* context) : context_(context), verbose_(false) {}
   
   void analyzePointerUsage(LoopInfo& loop);
   PointerRisk getPointerRisk(const LoopInfo& loop) const;
+  
+  void setVerbose(bool verbose) { verbose_ = verbose; }
   
   // Visit methods for pointer-related expressions
   void visitUnaryOperator(clang::UnaryOperator* unaryOp, LoopInfo& loop);
@@ -43,6 +45,7 @@ public:
   
 private:
   clang::ASTContext* context_;
+  bool verbose_;
   std::vector<PointerOperation> pointer_ops_;
   std::set<std::string> detected_pointers_;
   

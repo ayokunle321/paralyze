@@ -11,24 +11,28 @@ void PointerAnalyzer::analyzePointerUsage(LoopInfo& loop) {
   pointer_ops_.clear();
   detected_pointers_.clear();
   
-  std::cout << "  Analyzing pointer usage in loop at line " 
-           << loop.line_number << "\n";
+  if (verbose_) {
+    std::cout << "  Analyzing pointer usage in loop at line " 
+             << loop.line_number << "\n";
+  }
   
   // The actual pointer detection happens through the visitor methods
   // called from LoopVisitor and this method summarizes the results
   
   PointerRisk risk = getPointerRisk(loop);
   
-  switch (risk) {
-    case PointerRisk::SAFE:
-      std::cout << "  No pointer operations detected\n";
-      break;
-    case PointerRisk::POTENTIAL_ALIAS:
-      std::cout << "  Pointer operations detected - potential aliasing risk\n";
-      break;
-    case PointerRisk::UNSAFE:
-      std::cout << "  Complex pointer operations - unsafe for parallelization\n";
-      break;
+  if (verbose_) {
+    switch (risk) {
+      case PointerRisk::SAFE:
+        std::cout << "  No pointer operations detected\n";
+        break;
+      case PointerRisk::POTENTIAL_ALIAS:
+        std::cout << "  Pointer operations detected - potential aliasing risk\n";
+        break;
+      case PointerRisk::UNSAFE:
+        std::cout << "  Complex pointer operations - unsafe for parallelization\n";
+        break;
+    }
   }
 }
 
@@ -66,8 +70,10 @@ void PointerAnalyzer::visitUnaryOperator(UnaryOperator* unaryOp, LoopInfo& loop)
       std::string ptrName = extractPointerName(unaryOp->getSubExpr());
       if (!ptrName.empty()) {
         recordPointerOperation(ptrName, loc, true, false, false);
-        std::cout << "  Pointer dereference: *" << ptrName 
-                 << " at line " << line << "\n";
+        if (verbose_) {
+          std::cout << "  Pointer dereference: *" << ptrName 
+                   << " at line " << line << "\n";
+        }
       }
       break;
     }
@@ -75,8 +81,10 @@ void PointerAnalyzer::visitUnaryOperator(UnaryOperator* unaryOp, LoopInfo& loop)
       std::string varName = extractPointerName(unaryOp->getSubExpr());
       if (!varName.empty()) {
         recordPointerOperation(varName, loc, false, true, false);
-        std::cout << "  Address-of operation: &" << varName 
-                 << " at line " << line << "\n";
+        if (verbose_) {
+          std::cout << "  Address-of operation: &" << varName 
+                   << " at line " << line << "\n";
+        }
       }
       break;
     }
@@ -89,8 +97,10 @@ void PointerAnalyzer::visitUnaryOperator(UnaryOperator* unaryOp, LoopInfo& loop)
         std::string ptrName = extractPointerName(unaryOp->getSubExpr());
         if (!ptrName.empty()) {
           recordPointerOperation(ptrName, loc, false, false, true);
-          std::cout << "  Pointer arithmetic: " << ptrName 
-                   << "++ at line " << line << "\n";
+          if (verbose_) {
+            std::cout << "  Pointer arithmetic: " << ptrName 
+                     << "++ at line " << line << "\n";
+          }
         }
       }
       break;
@@ -117,10 +127,12 @@ void PointerAnalyzer::visitBinaryOperator(BinaryOperator* binOp, LoopInfo& loop)
         SourceLocation loc = binOp->getOperatorLoc();
         recordPointerOperation(ptrName, loc, false, false, true);
         
-        SourceManager& sm = context_->getSourceManager();
-        unsigned line = sm.getSpellingLineNumber(loc);
-        std::cout << "  Pointer arithmetic: " << ptrName 
-                 << " +/- offset at line " << line << "\n";
+        if (verbose_) {
+          SourceManager& sm = context_->getSourceManager();
+          unsigned line = sm.getSpellingLineNumber(loc);
+          std::cout << "  Pointer arithmetic: " << ptrName 
+                   << " +/- offset at line " << line << "\n";
+        }
       }
     }
   }
@@ -132,12 +144,14 @@ void PointerAnalyzer::visitBinaryOperator(BinaryOperator* binOp, LoopInfo& loop)
       std::string rhsName = extractPointerName(rhs);
       
       if (!lhsName.empty() && !rhsName.empty()) {
-        SourceLocation loc = binOp->getOperatorLoc();
-        SourceManager& sm = context_->getSourceManager();
-        unsigned line = sm.getSpellingLineNumber(loc);
-        
-        std::cout << "  Pointer assignment: " << lhsName << " = " << rhsName 
-                 << " at line " << line << " (potential aliasing)\n";
+        if (verbose_) {
+          SourceLocation loc = binOp->getOperatorLoc();
+          SourceManager& sm = context_->getSourceManager();
+          unsigned line = sm.getSpellingLineNumber(loc);
+          
+          std::cout << "  Pointer assignment: " << lhsName << " = " << rhsName 
+                   << " at line " << line << " (potential aliasing)\n";
+        }
       }
     }
   }
@@ -155,10 +169,12 @@ void PointerAnalyzer::visitMemberExpr(MemberExpr* memberExpr, LoopInfo& loop) {
       SourceLocation loc = memberExpr->getMemberLoc();
       recordPointerOperation(ptrName, loc, true, false, false);
       
-      SourceManager& sm = context_->getSourceManager();
-      unsigned line = sm.getSpellingLineNumber(loc);
-      std::cout << "  Pointer member access: " << ptrName 
-               << "->member at line " << line << "\n";
+      if (verbose_) {
+        SourceManager& sm = context_->getSourceManager();
+        unsigned line = sm.getSpellingLineNumber(loc);
+        std::cout << "  Pointer member access: " << ptrName 
+                 << "->member at line " << line << "\n";
+      }
     }
   }
 }

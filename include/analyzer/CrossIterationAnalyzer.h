@@ -40,9 +40,13 @@ public:
   void analyzeCrossIterationConflicts(LoopInfo& loop);
   bool hasCrossIterationConflicts(const LoopInfo& loop) const;
   
+  // Verbose control
+  void setVerbose(bool verbose) { verbose_ = verbose; }
+  
 private:
   clang::ASTContext* context_;
   std::vector<CrossIterationConflict> conflicts_;
+  bool verbose_ = false;
   
   void analyzeArrayAccessPattern(const std::string& array_name, 
                                const std::vector<ArrayAccess>& accesses,

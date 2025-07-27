@@ -13,7 +13,9 @@ namespace statik {
 class LoopVisitor : public clang::RecursiveASTVisitor<LoopVisitor> {
 public:
   explicit LoopVisitor(clang::ASTContext* context) 
-      : context_(context), dependency_analyzer_(std::make_unique<DependencyAnalyzer>(context)) {}
+      : context_(context), 
+        dependency_analyzer_(std::make_unique<DependencyAnalyzer>(context)),
+        verbose_(false) {}
 
   bool VisitForStmt(clang::ForStmt* forLoop);
   bool VisitWhileStmt(clang::WhileStmt* whileLoop);
@@ -27,12 +29,14 @@ public:
 
   const std::vector<LoopInfo>& getLoops() const { return loops_; }
   void printLoopSummary() const;
+  void setVerbose(bool verbose) { verbose_ = verbose; }
 
 private:
   clang::ASTContext* context_;
   std::vector<LoopInfo> loops_;
   std::stack<LoopInfo*> loop_stack_; // Track nesting hierarchy
   std::unique_ptr<DependencyAnalyzer> dependency_analyzer_;
+  bool verbose_; 
 
   void addLoop(clang::Stmt* stmt, clang::SourceLocation loc,
                const std::string& type);

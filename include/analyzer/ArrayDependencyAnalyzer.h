@@ -35,14 +35,17 @@ struct ArrayDependency {
 class ArrayDependencyAnalyzer {
 public:
   explicit ArrayDependencyAnalyzer(clang::ASTContext* context) 
-      : context_(context), 
+      : context_(context), verbose_(false),
         cross_iteration_analyzer_(std::make_unique<CrossIterationAnalyzer>(context)) {}
   
   void analyzeArrayDependencies(LoopInfo& loop);
   bool hasArrayDependencies(const LoopInfo& loop) const;
   
+  void setVerbose(bool verbose) { verbose_ = verbose; }
+  
 private:
   clang::ASTContext* context_;
+  bool verbose_;
   std::vector<ArrayDependency> detected_dependencies_;
   std::unique_ptr<CrossIterationAnalyzer> cross_iteration_analyzer_;
   

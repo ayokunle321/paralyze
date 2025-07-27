@@ -17,6 +17,12 @@ public:
   
   void analyzeDependencies(LoopInfo& loop);
   bool hasDependencies(const LoopInfo& loop) const;
+
+  void setVerbose(bool verbose) { 
+    if (manager_) {
+        manager_->setVerbose(verbose);
+    }
+  }
   
 private:
   clang::ASTContext* context_;

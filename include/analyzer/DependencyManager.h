@@ -22,6 +22,9 @@ public:
     void analyzeLoop(LoopInfo& loop);
     bool isLoopParallelizable(const LoopInfo& loop) const;
     
+    // Add verbose control
+    void setVerbose(bool verbose) { verbose_ = verbose; }
+    
     // Pragma location mapping
     void mapPragmaLocations(const std::vector<LoopInfo>& loops);
     
@@ -38,6 +41,7 @@ public:
     
 private:
     clang::ASTContext* context_;
+    bool verbose_ = false;  // Add verbose flag
     
     // Specialized analyzers
     std::unique_ptr<ArrayDependencyAnalyzer> array_analyzer_;

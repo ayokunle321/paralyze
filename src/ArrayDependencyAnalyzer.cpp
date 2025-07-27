@@ -9,8 +9,10 @@ namespace statik {
 void ArrayDependencyAnalyzer::analyzeArrayDependencies(LoopInfo& loop) {
   detected_dependencies_.clear();
   
-  std::cout << "  Analyzing array dependencies for " 
-           << loop.array_accesses.size() << " array accesses\n";
+  if (verbose_) {
+    std::cout << "  Analyzing array dependencies for " 
+             << loop.array_accesses.size() << " array accesses\n";
+  }
   
   // Compare every pair of array accesses for basic conflicts
   for (size_t i = 0; i < loop.array_accesses.size(); i++) {
@@ -28,8 +30,10 @@ void ArrayDependencyAnalyzer::analyzeArrayDependencies(LoopInfo& loop) {
   // Run cross-iteration analysis for more sophisticated conflict detection
   cross_iteration_analyzer_->analyzeCrossIterationConflicts(loop);
   
-  std::cout << "  Found " << detected_dependencies_.size() 
-           << " basic array dependencies\n";
+  if (verbose_) {
+    std::cout << "  Found " << detected_dependencies_.size() 
+             << " basic array dependencies\n";
+  }
 }
 
 bool ArrayDependencyAnalyzer::hasArrayDependencies(const LoopInfo& loop) const {
@@ -70,23 +74,25 @@ void ArrayDependencyAnalyzer::checkArrayAccessPair(const ArrayAccess& access1,
     
     detected_dependencies_.push_back(dependency);
     
-    std::cout << "  Array dependency: " << access1.array_name 
-             << "[" << idx1_str << "] vs [" << idx2_str << "] - ";
-    
-    switch (dep_type) {
-      case ArrayDependencyType::SAME_INDEX:
-        std::cout << "SAME INDEX (write conflict)";
-        break;
-      case ArrayDependencyType::CONSTANT_OFFSET:
-        std::cout << "CONSTANT OFFSET (loop-carried)";
-        break;
-      case ArrayDependencyType::UNKNOWN_RELATION:
-        std::cout << "UNKNOWN (assume unsafe)";
-        break;
-      default:
-        break;
+    if (verbose_) {
+      std::cout << "  Array dependency: " << access1.array_name 
+               << "[" << idx1_str << "] vs [" << idx2_str << "] - ";
+      
+      switch (dep_type) {
+        case ArrayDependencyType::SAME_INDEX:
+          std::cout << "SAME INDEX (write conflict)";
+          break;
+        case ArrayDependencyType::CONSTANT_OFFSET:
+          std::cout << "CONSTANT OFFSET (loop-carried)";
+          break;
+        case ArrayDependencyType::UNKNOWN_RELATION:
+          std::cout << "UNKNOWN (assume unsafe)";
+          break;
+        default:
+          break;
+      }
+      std::cout << "\n";
     }
-    std::cout << "\n";
   }
 }
 

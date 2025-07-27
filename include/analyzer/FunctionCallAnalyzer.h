@@ -38,10 +38,14 @@ public:
   
   void visitCallExpr(clang::CallExpr* callExpr, LoopInfo& loop);
   
+  // Verbose control
+  void setVerbose(bool verbose) { verbose_ = verbose; }
+  
 private:
   clang::ASTContext* context_;
   std::vector<FunctionCall> function_calls_;
   std::set<std::string> safe_math_functions_;
+  bool verbose_ = false;
   
   void initializeSafeFunctions();
   bool isSafeMathFunction(const std::string& name) const;

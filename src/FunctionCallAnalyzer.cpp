@@ -12,24 +12,28 @@ void FunctionCallAnalyzer::analyzeFunctionCalls(LoopInfo& loop) {
   function_calls_.clear();
   initializeSafeFunctions();
   
-  std::cout << "  Analyzing function calls in loop at line " 
-           << loop.line_number << "\n";
+  if (verbose_) {
+    std::cout << "  Analyzing function calls in loop at line " 
+             << loop.line_number << "\n";
+  }
   
   // Function call detection happens through visitCallExpr
   // This method summarizes the safety assessment
   
   FunctionCallSafety safety = getFunctionCallSafety(loop);
   
-  switch (safety) {
-    case FunctionCallSafety::SAFE:
-      std::cout << "  No problematic function calls detected\n";
-      break;
-    case FunctionCallSafety::POTENTIALLY_SAFE:
-      std::cout << "  Safe function calls detected (math functions only)\n";
-      break;
-    case FunctionCallSafety::UNSAFE:
-      std::cout << "  Unsafe function calls detected - not parallelizable\n";
-      break;
+  if (verbose_) {
+    switch (safety) {
+      case FunctionCallSafety::SAFE:
+        std::cout << "  No problematic function calls detected\n";
+        break;
+      case FunctionCallSafety::POTENTIALLY_SAFE:
+        std::cout << "  Safe function calls detected (math functions only)\n";
+        break;
+      case FunctionCallSafety::UNSAFE:
+        std::cout << "  Unsafe function calls detected - not parallelizable\n";
+        break;
+    }
   }
 }
 
@@ -74,17 +78,19 @@ void FunctionCallAnalyzer::visitCallExpr(CallExpr* callExpr, LoopInfo& loop) {
   
   function_calls_.emplace_back(funcName, loc, line, is_builtin, is_math, has_side_effects);
   
-  std::cout << "  Function call: " << funcName << " at line " << line;
-  
-  if (is_builtin) {
-    std::cout << " (builtin)";
-  } else if (is_math) {
-    std::cout << " (math function - potentially safe)";
-  } else if (has_side_effects) {
-    std::cout << " (UNSAFE - potential side effects)";
+  if (verbose_) {
+    std::cout << "  Function call: " << funcName << " at line " << line;
+    
+    if (is_builtin) {
+      std::cout << " (builtin)";
+    } else if (is_math) {
+      std::cout << " (math function - potentially safe)";
+    } else if (has_side_effects) {
+      std::cout << " (UNSAFE - potential side effects)";
+    }
+    
+    std::cout << "\n";
   }
-  
-  std::cout << "\n";
 }
 
 void FunctionCallAnalyzer::initializeSafeFunctions() {

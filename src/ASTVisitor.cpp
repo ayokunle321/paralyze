@@ -15,14 +15,17 @@ bool AnalyzerVisitor::VisitFunctionDecl(FunctionDecl* func) {
     }
 
     const std::string funcName = func->getNameAsString();
-    SourceLocation loc = func->getLocation();
-    std::cout << "Found function: " << funcName;
-    if (loc.isValid()) {
-        SourceManager& sm = context_->getSourceManager();
-        unsigned line = sm.getSpellingLineNumber(loc);
-        std::cout << " at line " << line;
+    
+    if (verbose_) {
+        SourceLocation loc = func->getLocation();
+        std::cout << "\nFound function: " << funcName;
+        if (loc.isValid()) {
+            SourceManager& sm = context_->getSourceManager();
+            unsigned line = sm.getSpellingLineNumber(loc);
+            std::cout << " at line " << line;
+        }
+        std::cout << "\n";
     }
-    std::cout << "\n";
 
     // Let the loop visitor handle loop detection
     loop_visitor_.TraverseStmt(func->getBody());
@@ -38,12 +41,16 @@ void AnalyzerVisitor::runAnalysis() {
         const auto& detected_loops = loop_visitor_.getLoops();
         
         if (detected_loops.empty()) {
-            std::cout << "\nNo loops detected - no pragma generation needed\n";
+            if (verbose_) {
+                std::cout << "\nNo loops detected - no pragma generation needed\n";
+            }
             return;
         }
         
-        std::cout << "\n=== Pragma Generation Pipeline ===\n";
-        std::cout << "Creating OpenMP annotated file: " << output_filename_ << "\n";
+        if (verbose_) {
+            std::cout << "\n=== Pragma Generation Pipeline ===\n";
+            std::cout << "Creating OpenMP annotated file: " << output_filename_ << "\n";
+        }
         
         try {
             // Initialize the pragma generation components
@@ -76,13 +83,15 @@ void AnalyzerVisitor::runAnalysis() {
             
             // Write the output file with OpenMP header
             if (annotator.writeAnnotatedFile(output_filename_)) {
-                std::cout << "Successfully created: " << output_filename_ << "\n";
-                std::cout << "Note: Compile with 'gcc -fopenmp " << output_filename_ 
-                         << "' for OpenMP support\n";
-                
-                // Show summary
-                pragma_gen.printPragmaSummary();
-                annotator.printAnnotationSummary();
+                if (verbose_) {
+                    std::cout << "Successfully created: " << output_filename_ << "\n";
+                    std::cout << "Note: Compile with 'gcc -fopenmp " << output_filename_ 
+                             << "' for OpenMP support\n";
+                    
+                    // Show summary
+                    pragma_gen.printPragmaSummary();
+                    annotator.printAnnotationSummary();
+                }
             } else {
                 std::cerr << "Error: Failed to create output file\n";
             }
@@ -91,7 +100,9 @@ void AnalyzerVisitor::runAnalysis() {
             std::cerr << "Error in pragma generation: " << e.what() << "\n";
         }
         
-        std::cout << "=================================\n";
+        if (verbose_) {
+            std::cout << "=================================\n";
+        }
     }
 }
 

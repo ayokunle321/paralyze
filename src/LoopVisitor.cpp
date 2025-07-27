@@ -109,9 +109,11 @@ bool LoopVisitor::VisitVarDecl(VarDecl* varDecl) {
   VariableInfo varInfo(varName, varDecl, scope, loc);
   getCurrentLoop()->addVariable(varInfo);
 
-  std::cout << "  Found variable declaration: " << varName 
-            << " (scope: " << (scope == VariableScope::LOOP_LOCAL ? "local" : "external")
-            << ")\n";
+  if (verbose_) {
+    std::cout << "  Found variable declaration: " << varName 
+              << " (scope: " << (scope == VariableScope::LOOP_LOCAL ? "local" : "external")
+              << ")\n";
+  }
 
   return true;
 }
@@ -144,8 +146,8 @@ bool LoopVisitor::VisitDeclRefExpr(DeclRefExpr* declRef) {
     
     currentLoop->addVariableUsage(varName, usage);
     
-    // Don't spam output for induction variables
-    if (varName != currentLoop->bounds.iterator_var) {
+    // Don't spam output for induction variables, and respect verbose flag
+    if (verbose_ && varName != currentLoop->bounds.iterator_var) {
       std::cout << "  Variable " << varName << " " 
                 << (isWrite ? "written" : "read") << " at line " << line << "\n";
     }
@@ -163,16 +165,20 @@ bool LoopVisitor::VisitBinaryOperator(BinaryOperator* binOp) {
   
   if (isArithmeticOp(binOp)) {
     currentLoop->incrementArithmeticOps();
-    std::cout << "  Arithmetic operation at line " 
-              << context_->getSourceManager().getSpellingLineNumber(binOp->getOperatorLoc()) 
-              << "\n";
+    if (verbose_) {
+      std::cout << "  Arithmetic operation at line " 
+                << context_->getSourceManager().getSpellingLineNumber(binOp->getOperatorLoc()) 
+                << "\n";
+    }
   } else if (isComparisonOp(binOp)) {
     currentLoop->incrementComparisons();
   } else if (binOp->isAssignmentOp()) {
     currentLoop->incrementAssignments();
-    std::cout << "  Assignment operation at line " 
-              << context_->getSourceManager().getSpellingLineNumber(binOp->getOperatorLoc()) 
-              << "\n";
+    if (verbose_) {
+      std::cout << "  Assignment operation at line " 
+                << context_->getSourceManager().getSpellingLineNumber(binOp->getOperatorLoc()) 
+                << "\n";
+    }
   }
   
   return true;
@@ -198,9 +204,11 @@ bool LoopVisitor::VisitCallExpr(CallExpr* callExpr) {
     LoopInfo* currentLoop = getCurrentLoop();
     currentLoop->incrementFunctionCalls();
     
-    std::cout << " Function call at line "
-              << context_->getSourceManager().getSpellingLineNumber(callExpr->getBeginLoc())
-              << "\n";
+    if (verbose_) {
+      std::cout << " Function call at line "
+                << context_->getSourceManager().getSpellingLineNumber(callExpr->getBeginLoc())
+                << "\n";
+    }
     
     // Analyze the function call and store the result in LoopInfo
     FunctionCallAnalyzer temp_analyzer(context_);
@@ -258,7 +266,7 @@ void LoopVisitor::analyzeForLoopBounds(ForStmt* forLoop, LoopInfo& info) {
         info.bounds.is_simple_pattern = true;
     }
     
-    if (info.bounds.is_simple_pattern) {
+    if (verbose_ && info.bounds.is_simple_pattern) {
         std::cout << " Simple iterator pattern detected: "
                   << info.bounds.iterator_var << " (depth " << info.depth << ")\n";
     }
@@ -270,13 +278,19 @@ void LoopVisitor::markInductionVariable(LoopInfo& loop) {
     auto it = loop.variables.find(loop.bounds.iterator_var);
     if (it != loop.variables.end()) {
       it->second.setRole(VariableRole::INDUCTION_VAR);
-      std::cout << "  Marked " << loop.bounds.iterator_var 
-                << " as induction variable (safe for parallelization)\n";
+      if (verbose_) {
+        std::cout << "  Marked " << loop.bounds.iterator_var 
+                  << " as induction variable (safe for parallelization)\n";
+      }
     }
   }
 }
 
 void LoopVisitor::finalizeDependencyAnalysis(LoopInfo& loop) {
+  // Pass verbose flag to dependency analyzer
+  if (dependency_analyzer_) {
+    dependency_analyzer_->setVerbose(verbose_);
+  }
   dependency_analyzer_->analyzeDependencies(loop);
   bool has_deps = dependency_analyzer_->hasDependencies(loop);
   loop.setHasDependencies(has_deps);
@@ -309,34 +323,36 @@ bool LoopVisitor::VisitArraySubscriptExpr(ArraySubscriptExpr* arrayExpr) {
     ArrayAccess access(arrayName, arrayExpr->getIdx(), loc, line, is_write);
     getCurrentLoop()->addArrayAccess(access);
     
-    // Show the actual subscript expression for debugging
-    std::string subscript_str = "unknown";
-    if (arrayExpr->getIdx()) {
-        // Use the same exprToString logic as ArrayDependencyAnalyzer
-        Expr* idx = arrayExpr->getIdx()->IgnoreParenImpCasts();
-        if (auto* declRef = dyn_cast<DeclRefExpr>(idx)) {
-            subscript_str = declRef->getDecl()->getNameAsString();
-        } else if (auto* binOp = dyn_cast<BinaryOperator>(idx)) {
-            // Handle expressions like i-1, i+1
-            if (auto* lhs = dyn_cast<DeclRefExpr>(binOp->getLHS())) {
-                if (auto* rhs = dyn_cast<IntegerLiteral>(binOp->getRHS())) {
-                    std::string var = lhs->getDecl()->getNameAsString();
-                    int constant = rhs->getValue().getSExtValue();
-                    if (binOp->getOpcode() == BO_Add) {
-                        subscript_str = var + "+" + std::to_string(constant);
-                    } else if (binOp->getOpcode() == BO_Sub) {
-                        subscript_str = var + "-" + std::to_string(constant);
-                    }
-                }
-            }
-        } else if (auto* intLit = dyn_cast<IntegerLiteral>(idx)) {
-            subscript_str = std::to_string(intLit->getValue().getSExtValue());
-        }
+    if (verbose_) {
+      // Show the actual subscript expression for debugging
+      std::string subscript_str = "unknown";
+      if (arrayExpr->getIdx()) {
+          // Use the same exprToString logic as ArrayDependencyAnalyzer
+          Expr* idx = arrayExpr->getIdx()->IgnoreParenImpCasts();
+          if (auto* declRef = dyn_cast<DeclRefExpr>(idx)) {
+              subscript_str = declRef->getDecl()->getNameAsString();
+          } else if (auto* binOp = dyn_cast<BinaryOperator>(idx)) {
+              // Handle expressions like i-1, i+1
+              if (auto* lhs = dyn_cast<DeclRefExpr>(binOp->getLHS())) {
+                  if (auto* rhs = dyn_cast<IntegerLiteral>(binOp->getRHS())) {
+                      std::string var = lhs->getDecl()->getNameAsString();
+                      int constant = rhs->getValue().getSExtValue();
+                      if (binOp->getOpcode() == BO_Add) {
+                          subscript_str = var + "+" + std::to_string(constant);
+                      } else if (binOp->getOpcode() == BO_Sub) {
+                          subscript_str = var + "-" + std::to_string(constant);
+                      }
+                  }
+              }
+          } else if (auto* intLit = dyn_cast<IntegerLiteral>(idx)) {
+              subscript_str = std::to_string(intLit->getValue().getSExtValue());
+          }
+      }
+      
+      std::cout << " Found array access: " << arrayName << "[" << subscript_str << "] at line " << line
+                << " (" << (is_write ? "WRITE" : "READ") << ")"
+                << " (depth " << getCurrentLoop()->depth << ")\n";
     }
-    
-    std::cout << " Found array access: " << arrayName << "[" << subscript_str << "] at line " << line
-              << " (" << (is_write ? "WRITE" : "READ") << ")"
-              << " (depth " << getCurrentLoop()->depth << ")\n";
     
     return true;
 }
@@ -422,81 +438,95 @@ void LoopVisitor::addLoop(Stmt* stmt, SourceLocation loc,
   loops_.emplace_back(stmt, loc, line, type);
 
   unsigned depth = static_cast<unsigned>(loop_stack_.size());
-  std::cout << "Found " << type << " loop at line " << line << " (depth "
-            << depth << ")\n";
+  if (verbose_) {
+    std::cout << "Found " << type << " loop at line " << line << " (depth "
+                << depth << ")\n";
+  }
 }
 
 void LoopVisitor::printLoopSummary() const {
-  std::cout << "\n=== Loop Analysis Summary ===\n";
-  std::cout << "Total loops detected: " << loops_.size() << "\n";
-
-  // Count different categories
-  size_t outermost_count = 0;
-  size_t hot_loops = 0;
-  size_t parallelizable = 0;
-  
-  for (const auto& loop : loops_) {
-    if (loop.isOutermost()) outermost_count++;
-    if (loop.isHot()) hot_loops++;
-    if (loop.isOutermost() && loop.isParallelizable()) parallelizable++;
-  }
-  
-  std::cout << "Outermost loops: " << outermost_count << "\n";
-  std::cout << "Hot loops (high computation): " << hot_loops << "\n";
-  std::cout << "Safe for parallelization: " << parallelizable << "\n\n";
-
-  for (const auto& loop : loops_) {
-    // Indent based on depth
-    for (unsigned i = 0; i < loop.depth; i++) {
-      std::cout << "  ";
-    }
-
-    std::cout << loop.loop_type << " loop at line " << loop.line_number;
-
-    if (loop.bounds.is_simple_pattern) {
-      std::cout << " (" << loop.bounds.iterator_var << ")";
-    }
-
-    // Show hotness score
-    std::cout << " [hotness: " << loop.metrics.hotness_score << "]";
+    std::cout << "\n=== Analysis Results ===\n";
     
-    if (loop.isHot()) {
-      std::cout << " HOT";
+    if (loops_.empty()) {
+        std::cout << "No loops detected in the analyzed code.\n";
+        return;
     }
-
-    if (loop.isOutermost()) {
-      if (loop.isParallelizable()) {
-        std::cout << " SAFE TO PARALLELIZE";
-      } else {
-        std::cout << " HAS DEPENDENCIES";
-      }
-    }
-
-    std::cout << "\n";
     
-    // Print detailed analysis for outermost loops
-    if (loop.isOutermost() && !loop.variables.empty()) {
-      for (unsigned i = 0; i <= loop.depth; i++) std::cout << "  ";
-      std::cout << "Variable analysis:\n";
-      
-      for (const auto& var_pair : loop.variables) {
-        const auto& var = var_pair.second;
-        for (unsigned i = 0; i <= loop.depth + 1; i++) std::cout << "  ";
+    // Print table header
+    std::cout << "Loop   Location    Type     Status          Reason\n";
+    std::cout << "----   --------    ----     ------          ------\n";
+    
+    size_t parallelizable_count = 0;
+    
+    for (size_t i = 0; i < loops_.size(); i++) {
+        const auto& loop = loops_[i];
         
-        std::cout << var.name << ": ";
-        if (var.isInductionVariable()) {
-          std::cout << "INDUCTION VAR (safe)";
-        } else if (var.isPotentialDependency()) {
-          std::cout << "READ+WRITE (dependency)";
-        } else if (var.hasWrites()) {
-          std::cout << "WRITE-ONLY (safe)";
-        } else if (var.hasReads()) {
-          std::cout << "READ-ONLY (safe)";
+        // Format: L1     line 6      for      PARALLELIZABLE  Simple array operations
+        std::cout << "L" << (i + 1);
+        
+        // Pad to align columns
+        std::cout << "     line " << loop.line_number;
+        if (loop.line_number < 10) std::cout << " ";  // Extra space for single digits
+        
+        std::cout << "     " << loop.loop_type;
+        if (loop.loop_type.length() < 5) std::cout << " ";  // Pad short types
+        
+        // Determine status and reason
+        std::string status, reason;
+        if (loop.isParallelizable()) {
+            status = "PARALLELIZABLE";
+            parallelizable_count++;
+            
+            // Determine why it's safe
+            if (loop.bounds.is_simple_pattern && !loop.array_accesses.empty()) {
+                reason = "Simple array operations";
+            } else if (loop.bounds.is_simple_pattern) {
+                reason = "Simple iterator pattern";
+            } else {
+                reason = "No dependencies detected";
+            }
+        } else {
+            status = "UNSAFE";
+            
+            // Determine why it's unsafe
+            bool has_array_deps = false;
+            bool has_function_calls = false;
+            
+            // Check if this loop has unsafe function calls
+            if (loop.hasUnsafeFunctionCalls()) {
+                has_function_calls = true;
+            }
+            
+            // Check if this loop has array dependencies (we'd need to check the actual dependencies)
+            // For now, we'll infer from the other conditions
+            if (!has_function_calls && loop.has_dependencies) {
+                has_array_deps = true;
+            }
+            
+            if (has_function_calls && has_array_deps) {
+                reason = "Function calls + dependencies";
+            } else if (has_function_calls) {
+                reason = "Function call side effects";
+            } else if (has_array_deps) {
+                reason = "Loop-carried dependency";
+            } else {
+                reason = "Complex dependencies";
+            }
         }
-        std::cout << " [" << var.usages.size() << " uses]\n";
-      }
+        
+        std::cout << "     " << status;
+        
+        // Pad status column
+        for (int pad = status.length(); pad < 15; pad++) {
+            std::cout << " ";
+        }
+        
+        std::cout << " " << reason << "\n";
     }
-  }
+    
+    // Summary line
+    std::cout << "\nParallelizable: " << parallelizable_count << "/" << loops_.size() 
+              << " loops (" << (loops_.size() > 0 ? (parallelizable_count * 100 / loops_.size()) : 0) << "%)\n";
 }
 
 } // namespace statik

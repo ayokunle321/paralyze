@@ -11,8 +11,10 @@ namespace statik {
 void CrossIterationAnalyzer::analyzeCrossIterationConflicts(LoopInfo& loop) {
   conflicts_.clear();
   
-  std::cout << "  Analyzing cross-iteration conflicts for loop at line " 
-           << loop.line_number << "\n";
+  if (verbose_) {
+    std::cout << "  Analyzing cross-iteration conflicts for loop at line " 
+             << loop.line_number << "\n";
+  }
   
   // Group array accesses by array name
   std::map<std::string, std::vector<ArrayAccess>> arrays_map;
@@ -30,10 +32,12 @@ void CrossIterationAnalyzer::analyzeCrossIterationConflicts(LoopInfo& loop) {
     }
   }
   
-  if (conflicts_.empty()) {
-    std::cout << "  No cross-iteration conflicts detected\n";
-  } else {
-    std::cout << "  Found " << conflicts_.size() << " potential cross-iteration conflicts\n";
+  if (verbose_) {
+    if (conflicts_.empty()) {
+      std::cout << "  No cross-iteration conflicts detected\n";
+    } else {
+      std::cout << "  Found " << conflicts_.size() << " potential cross-iteration conflicts\n";
+    }
   }
 }
 
@@ -45,7 +49,9 @@ void CrossIterationAnalyzer::analyzeArrayAccessPattern(const std::string& array_
                                                      const std::vector<ArrayAccess>& accesses,
                                                      const std::string& induction_var) {
   
-  std::cout << "  Analyzing " << accesses.size() << " accesses to array " << array_name << "\n";
+  if (verbose_) {
+    std::cout << "  Analyzing " << accesses.size() << " accesses to array " << array_name << "\n";
+  }
   
   // Check every pair of accesses for potential conflicts
   for (size_t i = 0; i < accesses.size(); i++) {
@@ -78,7 +84,9 @@ void CrossIterationAnalyzer::analyzeArrayAccessPattern(const std::string& array_
                                         access1.line_number, access2.line_number, desc);
           conflicts_.push_back(conflict);
           
-          std::cout << "  Cross-iteration conflict: " << desc << "\n";
+          if (verbose_) {
+            std::cout << "  Cross-iteration conflict: " << desc << "\n";
+          }
         }
       } else if (!has_offset1 || !has_offset2) {
         // One or both indices are complex - conservative assumption
@@ -90,7 +98,9 @@ void CrossIterationAnalyzer::analyzeArrayAccessPattern(const std::string& array_
                                       pattern, access1.line_number, access2.line_number, desc);
         conflicts_.push_back(conflict);
         
-        std::cout << "  Complex index pattern - assuming unsafe: " << desc << "\n";
+        if (verbose_) {
+          std::cout << "  Complex index pattern - assuming unsafe: " << desc << "\n";
+        }
       }
     }
   }

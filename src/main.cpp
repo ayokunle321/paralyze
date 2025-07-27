@@ -12,6 +12,7 @@ using namespace clang::tooling;
 
 // Global flags
 bool generate_pragmas = false;
+bool verbose_mode = false;
 std::string output_filename;
 
 std::string generateOutputFilename(const std::string& input_file) {
@@ -31,10 +32,13 @@ private:
     bool generate_pragmas_;
     std::string output_filename_;
     std::string input_filename_;
+    bool verbose_;
     
 public:
-    AnalyzerAction(bool gen_pragmas = false, const std::string& output = "", const std::string& input = "")
-        : generate_pragmas_(gen_pragmas), output_filename_(output), input_filename_(input) {}
+    AnalyzerAction(bool gen_pragmas = false, const std::string& output = "", 
+                   const std::string& input = "", bool verbose = false)
+        : generate_pragmas_(gen_pragmas), output_filename_(output), 
+          input_filename_(input), verbose_(verbose) {}
         
     std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance& compiler,
                                                    StringRef file) override {
@@ -43,6 +47,8 @@ public:
         if (generate_pragmas_) {
             consumer->enablePragmaGeneration(output_filename_, input_filename_);
         }
+        
+        consumer->setVerbose(verbose_);
         
         return consumer;
     }
@@ -56,9 +62,11 @@ void printUsage(const char* progName) {
     std::cout << "\nOptions:\n";
     std::cout << "  -h, --help     Show this help message\n";
     std::cout << "  -v, --version  Show version information\n";
+    std::cout << "  --verbose      Show detailed analysis information\n";
     std::cout << "\nExamples:\n";
     std::cout << "  " << progName << " code.c                    # Analysis only\n";
-    std::cout << "  " << progName << " --generate-pragmas code.c  # Creates code_openmp.c\n";
+    std::cout << "  " << progName << " --verbose code.c          # Detailed analysis\n";
+    std::cout << "  " << progName << " --generate-pragmas code.c # Creates code_openmp.c\n";
 }
 
 void printVersion() {
@@ -78,6 +86,8 @@ bool parseArgs(int argc, char** argv, std::string& input_file) {
             return false;
         } else if (arg == "--generate-pragmas") {
             generate_pragmas = true;
+        } else if (arg == "--verbose") {
+            verbose_mode = true;
         } else if (!arg.empty() && arg[0] != '-') {
             // This is the input file
             input_file = arg;
@@ -128,9 +138,9 @@ int main(int argc, char** argv) {
     // Create action with pragma generation settings
     std::unique_ptr<FrontendAction> action;
     if (generate_pragmas) {
-        action = std::make_unique<AnalyzerAction>(true, output_filename, input_file);
+        action = std::make_unique<AnalyzerAction>(true, output_filename, input_file, verbose_mode);
     } else {
-        action = std::make_unique<AnalyzerAction>(false, "", "");
+        action = std::make_unique<AnalyzerAction>(false, "", "", verbose_mode);
     }
     
     // Run analysis (and pragma generation if enabled)
