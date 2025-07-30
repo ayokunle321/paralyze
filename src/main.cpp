@@ -5,6 +5,7 @@
 #include "clang/Tooling/Tooling.h"
 #include "clang/Tooling/CommonOptionsParser.h"
 #include "clang/Frontend/FrontendActions.h"
+#include "clang/Frontend/CompilerInstance.h"
 #include "analyzer/ASTVisitor.h"
 
 using namespace clang;
@@ -39,6 +40,14 @@ public:
                    const std::string& input = "", bool verbose = false)
         : generate_pragmas_(gen_pragmas), output_filename_(output), 
           input_filename_(input), verbose_(verbose) {}
+    
+    bool BeginSourceFileAction(CompilerInstance& compiler) override {
+        // Suppress compilation diagnostics
+        DiagnosticsEngine &diags = compiler.getDiagnostics();
+        diags.setSuppressAllDiagnostics(true);
+        
+        return ASTFrontendAction::BeginSourceFileAction(compiler);
+    }
         
     std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance& compiler,
                                                    StringRef file) override {

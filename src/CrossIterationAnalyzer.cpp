@@ -76,8 +76,23 @@ void CrossIterationAnalyzer::analyzeArrayAccessPattern(const std::string& array_
                                                              offset1, offset2, stride);
         
         if (conflict_type != IterationConflictType::NO_CONFLICT) {
-          std::string pattern = induction_var + "+" + std::to_string(offset1) + 
-                               " vs " + induction_var + "+" + std::to_string(offset2);
+          // Format the pattern correctly
+          std::string pattern1 = induction_var;
+          std::string pattern2 = induction_var;
+          
+          if (offset1 > 0) {
+            pattern1 += "+" + std::to_string(offset1);
+          } else if (offset1 < 0) {
+            pattern1 += std::to_string(offset1);
+          }
+          
+          if (offset2 > 0) {
+            pattern2 += "+" + std::to_string(offset2);
+          } else if (offset2 < 0) {
+            pattern2 += std::to_string(offset2);
+          }
+          
+          std::string pattern = pattern1 + " vs " + pattern2;
           std::string desc = describeConflict(conflict_type, array_name, pattern);
           
           CrossIterationConflict conflict(array_name, conflict_type, pattern,

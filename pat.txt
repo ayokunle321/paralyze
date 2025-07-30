@@ -1,496 +1,2740 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <math.h>
+#include "analyzer/ASTVisitor.h"
+#include "analyzer/PragmaGenerator.h"
+#include "analyzer/PragmaLocationMapper.h"
+#include "analyzer/SourceAnnotator.h"
+#include "clang/AST/ASTContext.h"
+#include <iostream>
 
-// Test 1: Simple safe loop - should be parallelizable
-void test_simple_safe() {
-    int a[100], b[100], c[100];
-    
-    for (int i = 0; i < 100; i++) {
-        c[i] = a[i] + b[i];  // No dependencies between iterations
+using namespace clang;
+
+namespace statik {
+
+bool AnalyzerVisitor::VisitFunctionDecl(FunctionDecl* func) {
+    if (!func || !func->hasBody()) {
+        return true;
     }
+
+    const std::string funcName = func->getNameAsString();
+    
+    if (verbose_) {
+        SourceLocation loc = func->getLocation();
+        std::cout << "\nFound function: " << funcName;
+        if (loc.isValid()) {
+            SourceManager& sm = context_->getSourceManager();
+            unsigned line = sm.getSpellingLineNumber(loc);
+            std::cout << " at line " << line;
+        }
+        std::cout << "\n";
+    }
+
+    // Let the loop visitor handle loop detection
+    loop_visitor_.TraverseStmt(func->getBody());
+    return true;
 }
 
-// Test 2: Loop-carried dependency - unsafe
-void test_loop_carried_dependency() {
-    int arr[100];
+void AnalyzerVisitor::runAnalysis() {
+    // Always run the loop analysis and print summary
+    loop_visitor_.printLoopSummary();
     
-    for (int i = 1; i < 100; i++) {
-        arr[i] = arr[i-1] + 2;  // arr[i] depends on arr[i-1]
-    }
-}
-
-// Test 3: Scalar variable dependency - unsafe
-void test_scalar_dependency() {
-    int data[50];
-    int sum = 0;
-    
-    for (int j = 0; j < 50; j++) {
-        sum += data[j];  // sum has read-after-write dependency
-        data[j] = sum;
-    }
-}
-
-// Test 4: Pointer operations - unsafe
-void test_pointer_operations() {
-    int *ptr = malloc(100 * sizeof(int));
-    int *base = ptr;
-    
-    for (int k = 0; k < 100; k++) {
-        *ptr = k;      // Pointer dereference
-        ptr++;         // Pointer arithmetic
-    }
-    
-    free(base);
-}
-
-// Test 5: Function calls with side effects - unsafe
-void test_function_calls() {
-    int values[80];
-    
-    for (int m = 0; m < 80; m++) {
-        values[m] = rand();        // rand() has side effects
-        printf("%d\n", values[m]); // printf has side effects
-    }
-}
-
-// Test 6: Safe math functions - potentially safe
-void test_math_functions() {
-    double input[60];
-    double output[60];
-    
-    for (int n = 0; n < 60; n++) {
-        output[n] = sin(input[n]) + cos(input[n]);  // Pure math functions
-    }
-}
-
-// Test 7: Complex array indexing - unsafe
-void test_complex_indexing() {
-    int matrix[10][10];
-    int indices[100];
-    
-    for (int i = 0; i < 100; i++) {
-        int row = indices[i] % 10;
-        int col = (i * 3) % 10;
-        matrix[row][col] = i;  // Complex indexing pattern
-    }
-}
-
-// Test 8: Cross-iteration conflicts
-void test_cross_iteration() {
-    int buffer[200];
-    
-    for (int i = 2; i < 198; i++) {
-        buffer[i] = buffer[i-2] + buffer[i+1];  // Multiple offset conflicts
-    }
-}
-
-// Test 9: Nested loops with different safety
-void test_nested_loops() {
-    int data[20][20];
-    
-    // Outer loop should be safe, inner has dependency
-    for (int i = 0; i < 20; i++) {
-        int temp = 0;
-        for (int j = 1; j < 20; j++) {
-            temp += data[i][j-1];    // Inner loop has dependency
-            data[i][j] = temp;
+    // If pragma generation is enabled, run the full pipeline
+    if (generate_pragmas_) {
+        const auto& detected_loops = loop_visitor_.getLoops();
+        
+        if (detected_loops.empty()) {
+            if (verbose_) {
+                std::cout << "\nNo loops detected - no pragma generation needed\n";
+            }
+            return;
+        }
+        
+        if (verbose_) {
+            std::cout << "\n=== Pragma Generation Pipeline ===\n";
+            std::cout << "Creating OpenMP annotated file: " << output_filename_ << "\n";
+        }
+        
+        try {
+            // Initialize the pragma generation components
+            PragmaGenerator pragma_gen;
+            PragmaLocationMapper location_mapper(&context_->getSourceManager());
+            SourceAnnotator annotator(&context_->getSourceManager());
+            
+            // Generate pragmas for parallelizable loops
+            pragma_gen.generatePragmasForLoops(detected_loops);
+            
+            // Map pragma insertion locations
+            for (const auto& loop : detected_loops) {
+                if (!loop.has_dependencies) {
+                    location_mapper.mapLoopToPragmaLocation(loop);
+                }
+            }
+            
+            // Use the input filename passed from main
+            std::string input_filename = input_filename_;
+            
+            if (input_filename.empty()) {
+                std::cerr << "Error: Could not determine input filename\n";
+                return;
+            }
+            
+            // Create annotated source file
+            annotator.annotateSourceWithPragmas(input_filename,
+                                               pragma_gen.getGeneratedPragmas(),
+                                               location_mapper.getInsertionPoints());
+            
+            // Write the output file with OpenMP header
+            if (annotator.writeAnnotatedFile(output_filename_)) {
+                if (verbose_) {
+                    std::cout << "Successfully created: " << output_filename_ << "\n";
+                    std::cout << "Note: Compile with 'gcc -fopenmp " << output_filename_ 
+                             << "' for OpenMP support\n";
+                    
+                    // Show summary
+                    pragma_gen.printPragmaSummary();
+                    annotator.printAnnotationSummary();
+                }
+            } else {
+                std::cerr << "Error: Failed to create output file\n";
+            }
+            
+        } catch (const std::exception& e) {
+            std::cerr << "Error in pragma generation: " << e.what() << "\n";
+        }
+        
+        if (verbose_) {
+            std::cout << "=================================\n";
         }
     }
 }
 
-// Test 10: Pointer aliasing potential
-void test_pointer_aliasing() {
-    int array[150];
-    int *ptr1 = &array[0];
-    int *ptr2 = &array[50];
+} // namespace statik#include "analyzer/ArrayDependencyAnalyzer.h"
+#include "clang/AST/Expr.h"
+#include <iostream>
+
+using namespace clang;
+
+namespace statik {
+
+void ArrayDependencyAnalyzer::analyzeArrayDependencies(LoopInfo& loop) {
+  detected_dependencies_.clear();
+  
+  if (verbose_) {
+    std::cout << "  Analyzing array dependencies for " 
+             << loop.array_accesses.size() << " array accesses\n";
+  }
+  
+  // Compare every pair of array accesses for basic conflicts
+  for (size_t i = 0; i < loop.array_accesses.size(); i++) {
+    for (size_t j = i + 1; j < loop.array_accesses.size(); j++) {
+      const ArrayAccess& access1 = loop.array_accesses[i];
+      const ArrayAccess& access2 = loop.array_accesses[j];
+      
+      // Only check accesses to the same array
+      if (access1.array_name == access2.array_name) {
+        checkArrayAccessPair(access1, access2, loop.bounds.iterator_var);
+      }
+    }
+  }
+  
+  // Run cross-iteration analysis for more sophisticated conflict detection
+  cross_iteration_analyzer_->analyzeCrossIterationConflicts(loop);
+  
+  if (verbose_) {
+    std::cout << "  Found " << detected_dependencies_.size() 
+             << " basic array dependencies\n";
+  }
+}
+
+bool ArrayDependencyAnalyzer::hasArrayDependencies(const LoopInfo& loop) const {
+  // Check basic array dependencies
+  for (const auto& dep : detected_dependencies_) {
+    if (dep.type != ArrayDependencyType::NO_DEPENDENCY) {
+      return true;
+    }
+  }
+  
+  // Check cross-iteration conflicts
+  if (cross_iteration_analyzer_->hasCrossIterationConflicts(loop)) {
+    return true;
+  }
+  
+  return false;
+}
+
+void ArrayDependencyAnalyzer::checkArrayAccessPair(const ArrayAccess& access1, 
+                                                   const ArrayAccess& access2,
+                                                   const std::string& induction_var) {
+  // Skip if both are just reads - no dependency
+  if (!access1.is_write && !access2.is_write) {
+    return;
+  }
+  
+  ArrayDependencyType dep_type = compareArrayIndices(access1.subscript, 
+                                                   access2.subscript, 
+                                                   induction_var);
+  
+  if (dep_type != ArrayDependencyType::NO_DEPENDENCY) {
+    std::string idx1_str = exprToString(access1.subscript);
+    std::string idx2_str = exprToString(access2.subscript);
     
-    for (int i = 0; i < 50; i++) {
-        *ptr1 = i;           // Could alias with ptr2
-        *(ptr2 + i) = i * 2; // Potential aliasing conflict
-        ptr1++;
+    ArrayDependency dependency(access1.array_name, dep_type,
+                             access1.line_number, access2.line_number,
+                             idx1_str, idx2_str);
+    
+    detected_dependencies_.push_back(dependency);
+    
+    if (verbose_) {
+      std::cout << "  Array dependency: " << access1.array_name 
+               << "[" << idx1_str << "] vs [" << idx2_str << "] - ";
+      
+      switch (dep_type) {
+        case ArrayDependencyType::SAME_INDEX:
+          std::cout << "SAME INDEX (write conflict)";
+          break;
+        case ArrayDependencyType::CONSTANT_OFFSET:
+          std::cout << "CONSTANT OFFSET (loop-carried)";
+          break;
+        case ArrayDependencyType::UNKNOWN_RELATION:
+          std::cout << "UNKNOWN (assume unsafe)";
+          break;
+        default:
+          break;
+      }
+      std::cout << "\n";
+    }
+  }
+}
+
+ArrayDependencyType ArrayDependencyAnalyzer::compareArrayIndices(Expr* index1, 
+                                                                Expr* index2,
+                                                                const std::string& induction_var) {
+  if (!index1 || !index2) {
+    return ArrayDependencyType::UNKNOWN_RELATION;
+  }
+  
+  // Add safety checks to prevent crashes on malformed expressions
+  try {
+    std::string idx1_str = exprToString(index1);
+    std::string idx2_str = exprToString(index2);
+    
+    // If expression parsing failed, be conservative
+    if (idx1_str == "error_expr" || idx2_str == "error_expr") {
+      return ArrayDependencyType::UNKNOWN_RELATION;
+    }
+    
+    // Check if both are simple induction variable accesses (A[i] and A[i])
+    if (isSimpleInductionAccess(index1, induction_var) && 
+        isSimpleInductionAccess(index2, induction_var)) {
+      return ArrayDependencyType::SAME_INDEX;
+    }
+    
+    // Check for constant offset patterns like A[i] vs A[i+1]
+    if (hasConstantOffset(index1, index2)) {
+      return ArrayDependencyType::CONSTANT_OFFSET;
+    }
+    
+    // If indices look different but we can't prove they don't conflict
+    if (idx1_str != idx2_str) {
+      return ArrayDependencyType::UNKNOWN_RELATION;
+    }
+    
+    return ArrayDependencyType::NO_DEPENDENCY;
+  } catch (...) {
+    // Conservative fallback - assume unsafe if analysis fails
+    return ArrayDependencyType::UNKNOWN_RELATION;
+  }
+}
+
+bool ArrayDependencyAnalyzer::isSimpleInductionAccess(Expr* index, 
+                                                     const std::string& induction_var) {
+  if (!index || induction_var.empty()) {
+    return false;
+  }
+  
+  // Look for simple DeclRefExpr that matches induction variable
+  index = index->IgnoreParenImpCasts();
+  if (auto* declRef = dyn_cast<DeclRefExpr>(index)) {
+    return declRef->getDecl()->getNameAsString() == induction_var;
+  }
+  
+  return false;
+}
+
+bool ArrayDependencyAnalyzer::hasConstantOffset(Expr* index1, Expr* index2) {
+  if (!index1 || !index2) {
+    return false;
+  }
+  
+  // This is a simplified check - real implementation would need more sophisticated
+  // expression analysis to detect patterns like i vs i+1, i vs i-1, etc.
+  std::string str1 = exprToString(index1);
+  std::string str2 = exprToString(index2);
+  
+  // Look for obvious patterns like "i" vs "i + 1" or "i" vs "i - 1"
+  if ((str1.find("+") != std::string::npos || str1.find("-") != std::string::npos) &&
+      (str2.find("+") != std::string::npos || str2.find("-") != std::string::npos)) {
+    return true;  // Conservative: assume any arithmetic means potential offset
+  }
+  
+  return false;
+}
+
+std::string ArrayDependencyAnalyzer::exprToString(Expr* expr) {
+  if (!expr) {
+    return "null";
+  }
+  
+  // Add try-catch equivalent behavior for robustness
+  try {
+    expr = expr->IgnoreParenImpCasts();
+    
+    if (auto* declRef = dyn_cast<DeclRefExpr>(expr)) {
+      if (declRef->getDecl()) {
+        return declRef->getDecl()->getNameAsString();
+      }
+      return "unknown_var";
+    }
+    
+    if (auto* binOp = dyn_cast<BinaryOperator>(expr)) {
+      std::string lhs = exprToString(binOp->getLHS());
+      std::string rhs = exprToString(binOp->getRHS());
+      
+      // Prevent infinite recursion in complex expressions
+      if (lhs == "complex_expr" || rhs == "complex_expr") {
+        return "complex_expr";
+      }
+      
+      std::string op;
+      switch (binOp->getOpcode()) {
+        case BO_Add: op = " + "; break;
+        case BO_Sub: op = " - "; break;
+        case BO_Mul: op = " * "; break;
+        case BO_Div: op = " / "; break;
+        default: op = " ? "; break;
+      }
+      
+      return lhs + op + rhs;
+    }
+    
+    if (auto* intLit = dyn_cast<IntegerLiteral>(expr)) {
+      return std::to_string(intLit->getValue().getSExtValue());
+    }
+    
+    // Handle more expression types safely
+    if (auto* unaryOp = dyn_cast<UnaryOperator>(expr)) {
+      std::string sub = exprToString(unaryOp->getSubExpr());
+      switch (unaryOp->getOpcode()) {
+        case UO_Minus: return "-" + sub;
+        case UO_Plus: return "+" + sub;
+        default: return "unary_op(" + sub + ")";
+      }
+    }
+    
+    return "complex_expr";
+  } catch (...) {
+    // Fallback for any unexpected issues
+    return "error_expr";
+  }
+}
+
+} // namespace statik#include "analyzer/ConfidenceScorer.h"
+#include "analyzer/LoopInfo.h"
+#include "analyzer/PragmaGenerator.h"
+#include <algorithm>
+#include <cmath>
+
+namespace statik {
+
+ConfidenceScore ConfidenceScorer::calculateConfidence(const LoopInfo& loop, const GeneratedPragma& pragma) {
+  ConfidenceScore score;
+  
+  // Calculate individual scores
+  double loop_score = scoreLoopCharacteristics(loop);
+  double pragma_score = scorePragmaType(pragma.type);
+  double complexity_score = scoreComplexity(loop);
+  double data_score = scoreDataAccess(loop);
+  double dependency_score = scoreDependencyAnalysis(loop);
+  
+  // Weighted combination
+  double weights[] = {0.25, 0.15, 0.20, 0.20, 0.20};
+  double scores[] = {loop_score, pragma_score, complexity_score, data_score, dependency_score};
+  
+  score.numerical_score = 0.0;
+  for (int i = 0; i < 5; i++) {
+    score.numerical_score += weights[i] * scores[i];
+  }
+  
+  // Clamp to valid range
+  score.numerical_score = std::max(0.0, std::min(1.0, score.numerical_score));
+  score.level = convertToLevel(score.numerical_score);
+  
+  // Collect positive and negative factors
+  std::vector<std::string> positive_factors;
+  std::vector<std::string> negative_factors;
+  
+  // Analyze factors
+  if (loop.bounds.is_simple_pattern) {
+    positive_factors.push_back("Simple iterator pattern detected");
+  }
+  
+  if (loop.isHot()) {
+    positive_factors.push_back("High computational intensity");
+  }
+  
+  if (!loop.array_accesses.empty()) {
+    positive_factors.push_back("Array access patterns found");
+  }
+  
+  if (loop.depth == 0) {
+    positive_factors.push_back("Outermost loop (good for parallelization)");
+  } else {
+    negative_factors.push_back("Nested loop (reduced parallelization benefit)");
+  }
+  
+  if (loop.metrics.function_calls > 0) {
+    negative_factors.push_back("Contains function calls");
+  }
+  
+  if (loop.variables.size() > 5) {
+    negative_factors.push_back("Many variables in scope");
+  }
+  
+  score.positive_factors = positive_factors;
+  score.negative_factors = negative_factors;
+  score.reasoning = generateReasoning(loop, pragma, positive_factors, negative_factors);
+  
+  return score;
+}
+
+double ConfidenceScorer::scoreLoopCharacteristics(const LoopInfo& loop) {
+  double score = 0.5; // Base score
+  
+  // Simple patterns boost confidence
+  if (loop.bounds.is_simple_pattern) {
+    score += 0.3;
+  }
+  
+  // Outermost loops are easier to parallelize
+  if (loop.depth == 0) {
+    score += 0.2;
+  } else {
+    score -= 0.1 * loop.depth; // Penalty for nesting
+  }
+  
+  // Hot loops are good candidates
+  if (loop.isHot()) {
+    score += 0.1;
+  }
+  
+  return std::max(0.0, std::min(1.0, score));
+}
+
+double ConfidenceScorer::scorePragmaType(PragmaType type) {
+  switch (type) {
+    case PragmaType::PARALLEL_FOR:
+      return 0.8; // High confidence for basic parallel for
+    case PragmaType::PARALLEL_FOR_SIMD:
+      return 0.7; // Slightly lower for combined approach
+    case PragmaType::SIMD:
+      return 0.6; // SIMD only is more specialized
+    case PragmaType::NO_PRAGMA:
+    default:
+      return 0.0;
+  }
+}
+
+double ConfidenceScorer::scoreComplexity(const LoopInfo& loop) {
+  double score = 1.0; // Start high
+  
+  // Penalize based on complexity indicators
+  if (loop.metrics.function_calls > 2) {
+    score -= 0.3;
+  } else if (loop.metrics.function_calls > 0) {
+    score -= 0.1;
+  }
+  
+  // Too many variables suggests complexity
+  if (loop.variables.size() > 8) {
+    score -= 0.3;
+  } else if (loop.variables.size() > 5) {
+    score -= 0.1;
+  }
+  
+  // Complex arithmetic patterns
+  if (loop.metrics.arithmetic_ops > 10) {
+    score -= 0.1; // Might indicate complex calculations
+  }
+  
+  return std::max(0.0, std::min(1.0, score));
+}
+
+double ConfidenceScorer::scoreDataAccess(const LoopInfo& loop) {
+  double score = 0.5; // Neutral starting point
+  
+  // Array accesses are good for parallelization
+  if (!loop.array_accesses.empty()) {
+    score += 0.3;
+    
+    // Simple access patterns boost confidence
+    bool has_simple_access = true;
+    for (const auto& access : loop.array_accesses) {
+      // For now, assume accesses are simple if we got this far
+      // More sophisticated analysis would check index expressions
+    }
+    
+    if (has_simple_access) {
+      score += 0.2;
+    }
+  }
+  
+  // Memory-intensive loops benefit from parallelization
+  if (loop.metrics.memory_accesses > 5) {
+    score += 0.1;
+  }
+  
+  return std::max(0.0, std::min(1.0, score));
+}
+
+double ConfidenceScorer::scoreDependencyAnalysis(const LoopInfo& loop) {
+  // If we're generating a pragma, dependencies should be clean
+  if (loop.has_dependencies) {
+    return 0.0; // No confidence if dependencies detected
+  }
+  
+  double score = 0.8; // High base score for clean loops
+  
+  // Boost confidence if analysis was thorough
+  if (!loop.variables.empty()) {
+    score += 0.1; // We analyzed variables
+  }
+  
+  if (!loop.array_accesses.empty()) {
+    score += 0.1; // We analyzed array patterns
+  }
+  
+  return std::max(0.0, std::min(1.0, score));
+}
+
+ConfidenceLevel ConfidenceScorer::convertToLevel(double score) {
+  if (score >= 0.81) return ConfidenceLevel::VERY_HIGH;
+  if (score >= 0.61) return ConfidenceLevel::HIGH;
+  if (score >= 0.41) return ConfidenceLevel::MEDIUM;
+  if (score >= 0.21) return ConfidenceLevel::LOW;
+  return ConfidenceLevel::VERY_LOW;
+}
+
+std::string ConfidenceScorer::getConfidenceDescription(ConfidenceLevel level) const {
+  switch (level) {
+    case ConfidenceLevel::VERY_HIGH:
+      return "Very High (81-100%)";
+    case ConfidenceLevel::HIGH:
+      return "High (61-80%)";
+    case ConfidenceLevel::MEDIUM:
+      return "Medium (41-60%)";
+    case ConfidenceLevel::LOW:
+      return "Low (21-40%)";
+    case ConfidenceLevel::VERY_LOW:
+      return "Very Low (0-20%)";
+    default:
+      return "Unknown";
+  }
+}
+
+std::string ConfidenceScorer::generateReasoning(const LoopInfo& loop, const GeneratedPragma& pragma,
+                                               const std::vector<std::string>& pos_factors,
+                                               const std::vector<std::string>& neg_factors) {
+  std::string reasoning = "Confidence based on: ";
+  
+  if (!pos_factors.empty()) {
+    reasoning += "Positive factors: ";
+    for (size_t i = 0; i < pos_factors.size(); i++) {
+      if (i > 0) reasoning += ", ";
+      reasoning += pos_factors[i];
+    }
+  }
+  
+  if (!neg_factors.empty()) {
+    if (!pos_factors.empty()) reasoning += ". ";
+    reasoning += "Negative factors: ";
+    for (size_t i = 0; i < neg_factors.size(); i++) {
+      if (i > 0) reasoning += ", ";
+      reasoning += neg_factors[i];
+    }
+  }
+  
+  return reasoning;
+}
+
+} // namespace statik#include "analyzer/CrossIterationAnalyzer.h"
+#include "clang/AST/Expr.h"
+#include <iostream>
+#include <algorithm>
+#include <map>
+
+using namespace clang;
+
+namespace statik {
+
+void CrossIterationAnalyzer::analyzeCrossIterationConflicts(LoopInfo& loop) {
+  conflicts_.clear();
+  
+  if (verbose_) {
+    std::cout << "  Analyzing cross-iteration conflicts for loop at line " 
+             << loop.line_number << "\n";
+  }
+  
+  // Group array accesses by array name
+  std::map<std::string, std::vector<ArrayAccess>> arrays_map;
+  for (const auto& access : loop.array_accesses) {
+    arrays_map[access.array_name].push_back(access);
+  }
+  
+  // Analyze each array separately
+  for (const auto& array_pair : arrays_map) {
+    const std::string& array_name = array_pair.first;
+    const std::vector<ArrayAccess>& accesses = array_pair.second;
+    
+    if (accesses.size() > 1) {
+      analyzeArrayAccessPattern(array_name, accesses, loop.bounds.iterator_var);
+    }
+  }
+  
+  if (verbose_) {
+    if (conflicts_.empty()) {
+      std::cout << "  No cross-iteration conflicts detected\n";
+    } else {
+      std::cout << "  Found " << conflicts_.size() << " potential cross-iteration conflicts\n";
+    }
+  }
+}
+
+bool CrossIterationAnalyzer::hasCrossIterationConflicts(const LoopInfo& loop) const {
+  return !conflicts_.empty();
+}
+
+void CrossIterationAnalyzer::analyzeArrayAccessPattern(const std::string& array_name, 
+                                                     const std::vector<ArrayAccess>& accesses,
+                                                     const std::string& induction_var) {
+  
+  if (verbose_) {
+    std::cout << "  Analyzing " << accesses.size() << " accesses to array " << array_name << "\n";
+  }
+  
+  // Check every pair of accesses for potential conflicts
+  for (size_t i = 0; i < accesses.size(); i++) {
+    for (size_t j = i + 1; j < accesses.size(); j++) {
+      const ArrayAccess& access1 = accesses[i];
+      const ArrayAccess& access2 = accesses[j];
+      
+      // Skip if both are reads - no conflict
+      if (!access1.is_write && !access2.is_write) {
+        continue;
+      }
+      
+      // Analyze the index expressions to detect stride patterns
+      int offset1 = 0, offset2 = 0;
+      bool has_offset1 = hasOffsetFromInduction(access1.subscript, induction_var, offset1);
+      bool has_offset2 = hasOffsetFromInduction(access2.subscript, induction_var, offset2);
+      
+      if (has_offset1 && has_offset2) {
+        // Both use induction variable with offsets - check for conflicts
+        int stride = 1; // Assume unit stride for now
+        IterationConflictType conflict_type = classifyConflict(access1, access2, 
+                                                             offset1, offset2, stride);
+        
+        if (conflict_type != IterationConflictType::NO_CONFLICT) {
+          std::string pattern = induction_var + "+" + std::to_string(offset1) + 
+                               " vs " + induction_var + "+" + std::to_string(offset2);
+          std::string desc = describeConflict(conflict_type, array_name, pattern);
+          
+          CrossIterationConflict conflict(array_name, conflict_type, pattern,
+                                        access1.line_number, access2.line_number, desc);
+          conflicts_.push_back(conflict);
+          
+          if (verbose_) {
+            std::cout << "  Cross-iteration conflict: " << desc << "\n";
+          }
+        }
+      } else if (!has_offset1 || !has_offset2) {
+        // One or both indices are complex - conservative assumption
+        std::string pattern = "complex_indices";
+        std::string desc = describeConflict(IterationConflictType::STRIDE_CONFLICT, 
+                                          array_name, pattern);
+        
+        CrossIterationConflict conflict(array_name, IterationConflictType::STRIDE_CONFLICT,
+                                      pattern, access1.line_number, access2.line_number, desc);
+        conflicts_.push_back(conflict);
+        
+        if (verbose_) {
+          std::cout << "  Complex index pattern - assuming unsafe: " << desc << "\n";
+        }
+      }
+    }
+  }
+}
+
+bool CrossIterationAnalyzer::hasOffsetFromInduction(Expr* index, 
+                                                   const std::string& induction_var, 
+                                                   int& offset) {
+  if (!index || induction_var.empty()) {
+    return false;
+  }
+  
+  index = index->IgnoreParenImpCasts();
+  
+  // Case 1: Simple induction variable (i) -> offset = 0
+  if (auto* declRef = dyn_cast<DeclRefExpr>(index)) {
+    if (declRef->getDecl()->getNameAsString() == induction_var) {
+      offset = 0;
+      return true;
+    }
+  }
+  
+  // Case 2: Induction variable with constant offset (i+1, i-1)
+  if (auto* binOp = dyn_cast<BinaryOperator>(index)) {
+    if (binOp->getOpcode() == BO_Add || binOp->getOpcode() == BO_Sub) {
+      Expr* lhs = binOp->getLHS()->IgnoreParenImpCasts();
+      Expr* rhs = binOp->getRHS()->IgnoreParenImpCasts();
+      
+      // Check if LHS is induction variable and RHS is constant
+      if (auto* lhsRef = dyn_cast<DeclRefExpr>(lhs)) {
+        if (lhsRef->getDecl()->getNameAsString() == induction_var) {
+          if (auto* rhsLit = dyn_cast<IntegerLiteral>(rhs)) {
+            int constant = rhsLit->getValue().getSExtValue();
+            offset = (binOp->getOpcode() == BO_Add) ? constant : -constant;
+            return true;
+          }
+        }
+      }
+      
+      // Check if RHS is induction variable and LHS is constant (rare but possible)
+      if (auto* rhsRef = dyn_cast<DeclRefExpr>(rhs)) {
+        if (rhsRef->getDecl()->getNameAsString() == induction_var && 
+            binOp->getOpcode() == BO_Add) {
+          if (auto* lhsLit = dyn_cast<IntegerLiteral>(lhs)) {
+            offset = lhsLit->getValue().getSExtValue();
+            return true;
+          }
+        }
+      }
+    }
+  }
+  
+  return false;
+}
+
+IterationConflictType CrossIterationAnalyzer::classifyConflict(const ArrayAccess& access1, 
+                                                             const ArrayAccess& access2,
+                                                             int offset1, int offset2, 
+                                                             int stride) {
+  // If offsets are the same, different iterations access same element
+  if (offset1 == offset2) {
+    if (access1.is_write && access2.is_write) {
+      return IterationConflictType::WRITE_AFTER_WRITE;
+    } else if (access1.is_write || access2.is_write) {
+      // One write, one read
+      if (access1.line_number < access2.line_number) {
+        return access1.is_write ? IterationConflictType::READ_AFTER_WRITE 
+                               : IterationConflictType::WRITE_AFTER_READ;
+      } else {
+        return access2.is_write ? IterationConflictType::READ_AFTER_WRITE 
+                               : IterationConflictType::WRITE_AFTER_READ;
+      }
+    }
+  }
+  
+  // Check if offset difference matches stride (potential loop-carried dependency)
+  int offset_diff = std::abs(offset1 - offset2);
+  if (offset_diff == stride) {
+    // Adjacent iterations accessing related elements
+    if (access1.is_write || access2.is_write) {
+      return IterationConflictType::WRITE_AFTER_READ;  // Conservative
+    }
+  }
+  
+  return IterationConflictType::NO_CONFLICT;
+}
+
+std::string CrossIterationAnalyzer::describeConflict(IterationConflictType type, 
+                                                    const std::string& array_name,
+                                                    const std::string& pattern) {
+  std::string desc = array_name + "[" + pattern + "] - ";
+  
+  switch (type) {
+    case IterationConflictType::WRITE_AFTER_READ:
+      desc += "write after read conflict";
+      break;
+    case IterationConflictType::READ_AFTER_WRITE:
+      desc += "read after write conflict"; 
+      break;
+    case IterationConflictType::WRITE_AFTER_WRITE:
+      desc += "write after write conflict";
+      break;
+    case IterationConflictType::STRIDE_CONFLICT:
+      desc += "stride/indexing conflict";
+      break;
+    default:
+      desc += "unknown conflict";
+      break;
+  }
+  
+  return desc;
+}
+
+bool CrossIterationAnalyzer::detectsStridePattern(Expr* index, const std::string& induction_var, int& stride) {
+  // Simplified implementation - assume unit stride for now
+  stride = 1;
+  return true;
+}
+
+} // namespace statik#include "analyzer/DependencyAnalyzer.h"
+#include <iostream>
+
+using namespace clang;
+
+namespace statik {
+
+void DependencyAnalyzer::analyzeDependencies(LoopInfo& loop) {
+  // Delegate to the new DependencyManager
+  manager_->analyzeLoop(loop);
+}
+
+bool DependencyAnalyzer::hasDependencies(const LoopInfo& loop) const {
+  return !manager_->isLoopParallelizable(loop);
+}
+
+} // namespace statik#include "analyzer/DependencyManager.h"
+#include "analyzer/LoopInfo.h"
+#include "analyzer/ArrayDependencyAnalyzer.h"
+#include "analyzer/PointerAnalyzer.h"
+#include "analyzer/FunctionCallAnalyzer.h"
+#include "analyzer/PragmaLocationMapper.h"
+#include "analyzer/PragmaGenerator.h"
+#include "analyzer/SourceAnnotator.h"
+#include <iostream>
+#include <stdexcept>
+
+using namespace clang;
+
+namespace statik {
+
+DependencyManager::DependencyManager(ASTContext* context)
+    : context_(context),
+      array_analyzer_(std::make_unique<ArrayDependencyAnalyzer>(context)),
+      pointer_analyzer_(std::make_unique<PointerAnalyzer>(context)),
+      function_analyzer_(std::make_unique<FunctionCallAnalyzer>(context)),
+      location_mapper_(std::make_unique<PragmaLocationMapper>(&context->getSourceManager())),
+      pragma_generator_(std::make_unique<PragmaGenerator>()),
+      source_annotator_(std::make_unique<SourceAnnotator>(&context->getSourceManager())) {
+}
+
+void DependencyManager::analyzeLoop(LoopInfo& loop) {
+  warnings_.clear();
+  
+  if (verbose_) {
+    std::cout << "\n\n=== Dependency Analysis for Loop at Line " << loop.line_number << " ===\n";
+  }
+  
+  try {
+    runScalarAnalysis(loop);
+    runArrayAnalysis(loop);
+    runPointerAnalysis(loop);
+    runFunctionAnalysis(loop);
+    
+    // Set final parallelization decision
+    bool is_safe = isLoopParallelizable(loop);
+    loop.setHasDependencies(!is_safe);
+    
+    if (verbose_) {
+      std::cout << "\n--- Final Decision ---\n";
+      if (is_safe) {
+        std::cout << "Loop is SAFE for parallelization\n";
+      } else {
+        std::cout << "Loop is UNSAFE for parallelization\n";
+        if (!warnings_.empty()) {
+          std::cout << "Reasons:\n";
+          for (const auto& warning : warnings_) {
+            std::cout << "  - " << warning << "\n";
+          }
+        }
+      }
+      std::cout << "====================================\n\n";
+    }
+    
+  } catch (const std::exception& e) {
+    recordWarning("Analysis failed with exception: " + std::string(e.what()));
+    loop.setHasDependencies(true);  // Conservative fallback
+  }
+}
+
+bool DependencyManager::isLoopParallelizable(const LoopInfo& loop) const {
+  // A loop is parallelizable if it has no dependencies from any analyzer
+  return !hasScalarDependencies(loop) &&
+         !array_analyzer_->hasArrayDependencies(loop) &&
+         (pointer_analyzer_->getPointerRisk(loop) == PointerRisk::SAFE) &&
+         (function_analyzer_->getFunctionCallSafety(loop) != FunctionCallSafety::UNSAFE);
+}
+
+void DependencyManager::runScalarAnalysis(LoopInfo& loop) {
+  if (verbose_) {
+    std::cout << "\n--- Scalar Variable Analysis ---\n";
+  }
+  
+  bool found_scalar_deps = false;
+  
+  for (const auto& var_pair : loop.variables) {
+    const auto& var = var_pair.second;
+    
+    if (var.isInductionVariable()) {
+      if (verbose_) {
+        std::cout << "  " << var.name << ": INDUCTION VARIABLE (safe)\n";
+      }
+      continue;
+    }
+    
+    if (var.hasReads() && var.hasWrites()) {
+      if (verbose_) {
+        std::cout << "  " << var.name << ": READ+WRITE dependency detected\n";
+      }
+      recordWarning("Scalar variable '" + var.name + "' has read-after-write dependency");
+      found_scalar_deps = true;
+    } else if (var.hasWrites()) {
+      if (verbose_) {
+        std::cout << "  " << var.name << ": WRITE-ONLY (safe)\n";
+      }
+    } else if (var.hasReads()) {
+      if (verbose_) {
+        std::cout << "  " << var.name << ": READ-ONLY (safe)\n";
+      }
+    }
+  }
+  
+  if (verbose_ && !found_scalar_deps) {
+    std::cout << "  No scalar dependencies detected\n";
+  }
+}
+
+void DependencyManager::runArrayAnalysis(LoopInfo& loop) {
+  if (verbose_) {
+    std::cout << "\n--- Array Dependency Analysis ---\n";
+  }
+  
+  try {
+    array_analyzer_->setVerbose(verbose_);
+    array_analyzer_->analyzeArrayDependencies(loop);
+    
+    if (array_analyzer_->hasArrayDependencies(loop)) {
+      recordWarning("Array access conflicts detected");
+    }
+  } catch (...) {
+    recordWarning("Array analysis failed - assuming unsafe");
+  }
+}
+
+void DependencyManager::runPointerAnalysis(LoopInfo& loop) {
+  if (verbose_) {
+    std::cout << "\n--- Pointer Analysis ---\n";
+  }
+  
+  try {
+    pointer_analyzer_->setVerbose(verbose_);
+    pointer_analyzer_->analyzePointerUsage(loop);
+    
+    PointerRisk risk = pointer_analyzer_->getPointerRisk(loop);
+    switch (risk) {
+      case PointerRisk::POTENTIAL_ALIAS:
+        recordWarning("Potential pointer aliasing detected");
+        break;
+      case PointerRisk::UNSAFE:
+        recordWarning("Complex pointer operations detected");
+        break;
+      case PointerRisk::SAFE:
+        // No warning needed
+        break;
+    }
+  } catch (...) {
+    recordWarning("Pointer analysis failed - assuming unsafe");
+  }
+}
+
+void DependencyManager::runFunctionAnalysis(LoopInfo& loop) {
+  if (verbose_) {
+    std::cout << "\n--- Function Call Analysis ---\n";
+  }
+  
+  try {
+    function_analyzer_->setVerbose(verbose_);
+    function_analyzer_->analyzeFunctionCalls(loop);
+    
+    FunctionCallSafety safety = function_analyzer_->getFunctionCallSafety(loop);
+    switch (safety) {
+      case FunctionCallSafety::UNSAFE:
+        recordWarning("Function calls with side effects detected");
+        break;
+      case FunctionCallSafety::POTENTIALLY_SAFE:
+        if (verbose_) {
+          std::cout << "  Math functions detected (potentially safe)\n";
+        }
+        break;
+      case FunctionCallSafety::SAFE:
+        // No warning needed
+        break;
+    }
+  } catch (...) {
+    recordWarning("Function analysis failed - assuming unsafe");
+  }
+}
+
+void DependencyManager::recordWarning(const std::string& warning) {
+  warnings_.push_back(warning);
+}
+
+bool DependencyManager::hasScalarDependencies(const LoopInfo& loop) const {
+  for (const auto& var_pair : loop.variables) {
+    const auto& var = var_pair.second;
+    
+    if (var.isInductionVariable()) {
+      continue;
+    }
+    
+    if (var.hasReads() && var.hasWrites()) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+void DependencyManager::mapPragmaLocations(const std::vector<LoopInfo>& loops) {
+  location_mapper_->clearInsertionPoints();
+  
+  std::cout << "\n=== Mapping Pragma Insertion Points ===\n";
+  
+  for (const auto& loop : loops) {
+    // Only map locations for parallelizable loops
+    if (isLoopParallelizable(loop)) {
+      location_mapper_->mapLoopToPragmaLocation(loop);
+    } else {
+      std::cout << "  Skipping unsafe loop at line " << loop.line_number << "\n";
+    }
+  }
+  
+  const auto& points = location_mapper_->getInsertionPoints();
+  std::cout << "  Total pragma insertion points identified: " << points.size() << "\n";
+  std::cout << "==============================\n";
+}
+
+void DependencyManager::generatePragmas(const std::vector<LoopInfo>& loops) {
+  pragma_generator_->generatePragmasForLoops(loops);
+  pragma_generator_->printPragmaSummary();
+}
+
+void DependencyManager::annotateSourceFile(const std::string& input_filename, 
+                                          const std::string& output_filename) {
+  const auto& pragmas = pragma_generator_->getGeneratedPragmas();
+  const auto& insertion_points = location_mapper_->getInsertionPoints();
+  
+  source_annotator_->annotateSourceWithPragmas(input_filename, pragmas, insertion_points);
+  
+  if (source_annotator_->writeAnnotatedFile(output_filename)) {
+    source_annotator_->printAnnotationSummary();
+  }
+}
+
+} // namespace statik#include "analyzer/FunctionCallAnalyzer.h"
+#include "clang/AST/Decl.h"
+#include "clang/Basic/SourceManager.h" 
+#include <iostream>
+#include <algorithm>
+
+using namespace clang;
+
+namespace statik {
+
+void FunctionCallAnalyzer::analyzeFunctionCalls(LoopInfo& loop) {
+  function_calls_.clear();
+  initializeSafeFunctions();
+  
+  if (verbose_) {
+    std::cout << "  Analyzing function calls in loop at line " 
+             << loop.line_number << "\n";
+  }
+  
+  // Function call detection happens through visitCallExpr
+  // This method summarizes the safety assessment
+  
+  FunctionCallSafety safety = getFunctionCallSafety(loop);
+  
+  if (verbose_) {
+    switch (safety) {
+      case FunctionCallSafety::SAFE:
+        std::cout << "  No problematic function calls detected\n";
+        break;
+      case FunctionCallSafety::POTENTIALLY_SAFE:
+        std::cout << "  Safe function calls detected (math functions only)\n";
+        break;
+      case FunctionCallSafety::UNSAFE:
+        std::cout << "  Unsafe function calls detected - not parallelizable\n";
+        break;
+    }
+  }
+}
+
+FunctionCallSafety FunctionCallAnalyzer::getFunctionCallSafety(const LoopInfo& loop) const {
+  // Check the stored function call info in LoopInfo
+  if (loop.detected_function_calls.empty()) {
+    return FunctionCallSafety::SAFE;
+  }
+  
+  // Check the stored safety flags
+  if (loop.hasUnsafeFunctionCalls()) {
+    return FunctionCallSafety::UNSAFE;
+  }
+  
+  // If we have function calls but they're all safe, check if they're math functions
+  bool has_potentially_safe_calls = !loop.detected_function_calls.empty();
+  
+  if (has_potentially_safe_calls) {
+    return FunctionCallSafety::POTENTIALLY_SAFE;
+  }
+  
+  return FunctionCallSafety::SAFE;
+}
+
+void FunctionCallAnalyzer::visitCallExpr(CallExpr* callExpr, LoopInfo& loop) {
+  if (!callExpr) {
+    return;
+  }
+  
+  std::string funcName = getFunctionName(callExpr);
+  if (funcName.empty()) {
+    funcName = "unknown_function";
+  }
+  
+  SourceLocation loc = callExpr->getBeginLoc();
+  SourceManager& sm = context_->getSourceManager();
+  unsigned line = sm.getSpellingLineNumber(loc);
+  
+  bool is_builtin = isBuiltinFunction(callExpr);
+  bool is_math = isSafeMathFunction(funcName);
+  bool has_side_effects = hasPotentialSideEffects(funcName);
+  
+  function_calls_.emplace_back(funcName, loc, line, is_builtin, is_math, has_side_effects);
+  
+  if (verbose_) {
+    std::cout << "  Function call: " << funcName << " at line " << line;
+    
+    if (is_builtin) {
+      std::cout << " (builtin)";
+    } else if (is_math) {
+      std::cout << " (math function - potentially safe)";
+    } else if (has_side_effects) {
+      std::cout << " (UNSAFE - potential side effects)";
+    }
+    
+    std::cout << "\n";
+  }
+}
+
+void FunctionCallAnalyzer::initializeSafeFunctions() {
+  // Common math functions that are generally safe for parallelization
+  safe_math_functions_ = {
+    "sin", "cos", "tan", "asin", "acos", "atan", "atan2",
+    "sinh", "cosh", "tanh", "asinh", "acosh", "atanh",
+    "exp", "exp2", "expm1", "log", "log10", "log2", "log1p",
+    "sqrt", "cbrt", "pow", "hypot",
+    "ceil", "floor", "trunc", "round", "nearbyint", "rint",
+    "fabs", "abs", "fmod", "remainder", "remquo",
+    "fmin", "fmax", "fdim", "fma",
+    "isfinite", "isinf", "isnan", "isnormal", "signbit"
+  };
+}
+
+bool FunctionCallAnalyzer::isSafeMathFunction(const std::string& name) const {
+  return safe_math_functions_.find(name) != safe_math_functions_.end();
+}
+
+bool FunctionCallAnalyzer::isBuiltinFunction(CallExpr* callExpr) const {
+  if (auto* funcDecl = callExpr->getDirectCallee()) {
+    return funcDecl->getBuiltinID() != 0;
+  }
+  return false;
+}
+
+std::string FunctionCallAnalyzer::getFunctionName(CallExpr* callExpr) const {
+  if (!callExpr) {
+    return "";
+  }
+  
+  try {
+    if (auto* funcDecl = callExpr->getDirectCallee()) {
+      if (funcDecl->getDeclName().isIdentifier()) {
+        return funcDecl->getNameAsString();
+      }
+    }
+    
+    // Try to get name from function pointer or member call
+    if (Expr* callee = callExpr->getCallee()) {
+      callee = callee->IgnoreParenImpCasts();
+      
+      if (auto* declRef = dyn_cast<DeclRefExpr>(callee)) {
+        if (declRef->getDecl()) {
+          return declRef->getDecl()->getNameAsString();
+        }
+      }
+      
+      if (auto* memberExpr = dyn_cast<MemberExpr>(callee)) {
+        if (memberExpr->getMemberDecl()) {
+          return memberExpr->getMemberDecl()->getNameAsString();
+        }
+      }
+    }
+  } catch (...) {
+    // Return safe default if anything goes wrong
+    return "unknown_function";
+  }
+  
+  return "";
+}
+
+bool FunctionCallAnalyzer::hasPotentialSideEffects(const std::string& function_name) const {
+  // Conservative approach: assume unknown functions have side effects
+  
+  // Known safe functions
+  if (isSafeMathFunction(function_name)) {
+    return false;
+  }
+  
+  // Functions that are generally safe (read-only operations)
+  static const std::set<std::string> safe_functions = {
+    "strlen", "strcmp", "strncmp", "strchr", "strstr",
+    "memcmp", "isalpha", "isdigit", "isspace", "toupper", "tolower"
+  };
+  
+  if (safe_functions.find(function_name) != safe_functions.end()) {
+    return false;
+  }
+  
+  // Functions that definitely have side effects
+  static const std::set<std::string> unsafe_functions = {
+    "printf", "fprintf", "sprintf", "puts", "putchar",
+    "scanf", "fscanf", "sscanf", "getchar", "gets", "fgets",
+    "malloc", "calloc", "realloc", "free",
+    "fopen", "fclose", "fread", "fwrite", "fseek", "ftell",
+    "exit", "abort", "system", "rand", "srand", "time"
+  };
+  
+  if (unsafe_functions.find(function_name) != unsafe_functions.end()) {
+    return true;
+  }
+  
+  // Conservative default: assume unknown functions have side effects
+  return true;
+}
+
+} // namespace statik#include "analyzer/LoopVisitor.h"
+#include "clang/AST/Expr.h"
+#include "clang/AST/Stmt.h"
+#include "clang/AST/ParentMapContext.h"
+#include "analyzer/FunctionCallAnalyzer.h"
+#include <iostream>
+
+using namespace clang;
+
+namespace statik {
+
+bool LoopVisitor::VisitForStmt(ForStmt* forLoop) {
+  if (!forLoop) {
+    return true;
+  }
+
+  SourceLocation loc = forLoop->getForLoc();
+  addLoop(forLoop, loc, "for");
+
+  // Get the newly added loop and set up parent relationship
+  LoopInfo* newLoop = &loops_.back();
+  if (!loop_stack_.empty()) {
+    newLoop->setParent(loop_stack_.top());
+  }
+
+  // Analyze loop bounds and identify induction variable
+  analyzeForLoopBounds(forLoop, *newLoop);
+
+  // Push this loop onto stack and traverse body
+  loop_stack_.push(newLoop);
+
+  if (forLoop->getBody()) {
+    TraverseStmt(forLoop->getBody());
+  }
+
+  // After traversing, mark the induction variable
+  markInductionVariable(*newLoop);
+
+  // Run dependency analysis
+  finalizeDependencyAnalysis(*newLoop);
+
+  // Finalize metrics before popping
+  newLoop->finalizeMetrics();
+  loop_stack_.pop();
+  return true;
+}
+
+bool LoopVisitor::VisitWhileStmt(WhileStmt* whileLoop) {
+  if (!whileLoop) {
+    return true;
+  }
+
+  SourceLocation loc = whileLoop->getWhileLoc();
+  addLoop(whileLoop, loc, "while");
+
+  LoopInfo* newLoop = &loops_.back();
+  if (!loop_stack_.empty()) {
+    newLoop->setParent(loop_stack_.top());
+  }
+
+  loop_stack_.push(newLoop);
+
+  if (whileLoop->getBody()) {
+    TraverseStmt(whileLoop->getBody());
+  }
+
+  markInductionVariable(*newLoop);
+  finalizeDependencyAnalysis(*newLoop);
+  newLoop->finalizeMetrics();
+  loop_stack_.pop();
+  return true;
+}
+
+bool LoopVisitor::VisitDoStmt(DoStmt* doLoop) {
+  if (!doLoop) {
+    return true;
+  }
+
+  SourceLocation loc = doLoop->getDoLoc();
+  addLoop(doLoop, loc, "do-while");
+
+  LoopInfo* newLoop = &loops_.back();
+  if (!loop_stack_.empty()) {
+    newLoop->setParent(loop_stack_.top());
+  }
+
+  loop_stack_.push(newLoop);
+
+  if (doLoop->getBody()) {
+    TraverseStmt(doLoop->getBody());
+  }
+
+  markInductionVariable(*newLoop);
+  finalizeDependencyAnalysis(*newLoop);
+  newLoop->finalizeMetrics();
+  loop_stack_.pop();
+  return true;
+}
+
+bool LoopVisitor::VisitVarDecl(VarDecl* varDecl) {
+  if (!varDecl || !isInsideLoop()) {
+    return true;
+  }
+
+  const std::string varName = varDecl->getNameAsString();
+  VariableScope scope = determineVariableScope(varDecl);
+  SourceLocation loc = varDecl->getLocation();
+
+  VariableInfo varInfo(varName, varDecl, scope, loc);
+  getCurrentLoop()->addVariable(varInfo);
+
+  if (verbose_) {
+    std::cout << "  Found variable declaration: " << varName 
+              << " (scope: " << (scope == VariableScope::LOOP_LOCAL ? "local" : "external")
+              << ")\n";
+  }
+
+  return true;
+}
+
+bool LoopVisitor::VisitDeclRefExpr(DeclRefExpr* declRef) {
+  if (!declRef || !isInsideLoop()) {
+    return true;
+  }
+
+  if (auto* varDecl = dyn_cast<VarDecl>(declRef->getDecl())) {
+    const std::string varName = varDecl->getNameAsString();
+    SourceLocation loc = declRef->getLocation();
+    SourceManager& sm = context_->getSourceManager();
+    unsigned line = sm.getSpellingLineNumber(loc);
+
+    // Determine if this is a read or write by looking at parent context
+    bool isWrite = isWriteAccess(declRef);
+    bool isRead = !isWrite;
+    
+    VariableUsage usage(loc, line, isRead, isWrite);
+    
+    LoopInfo* currentLoop = getCurrentLoop();
+    auto it = currentLoop->variables.find(varName);
+    if (it == currentLoop->variables.end()) {
+      // Variable not yet tracked, add it
+      VariableScope scope = determineVariableScope(varDecl);
+      VariableInfo varInfo(varName, varDecl, scope, varDecl->getLocation());
+      currentLoop->addVariable(varInfo);
+    }
+    
+    currentLoop->addVariableUsage(varName, usage);
+    
+    // Don't spam output for induction variables, and respect verbose flag
+    if (verbose_ && varName != currentLoop->bounds.iterator_var) {
+      std::cout << "  Variable " << varName << " " 
+                << (isWrite ? "written" : "read") << " at line " << line << "\n";
+    }
+  }
+
+  return true;
+}
+
+bool LoopVisitor::VisitBinaryOperator(BinaryOperator* binOp) {
+  if (!binOp || !isInsideLoop()) {
+    return true;
+  }
+  
+  LoopInfo* currentLoop = getCurrentLoop();
+  
+  if (isArithmeticOp(binOp)) {
+    currentLoop->incrementArithmeticOps();
+    if (verbose_) {
+      std::cout << "  Arithmetic operation at line " 
+                << context_->getSourceManager().getSpellingLineNumber(binOp->getOperatorLoc()) 
+                << "\n";
+    }
+  } else if (isComparisonOp(binOp)) {
+    currentLoop->incrementComparisons();
+  } else if (binOp->isAssignmentOp()) {
+    currentLoop->incrementAssignments();
+    if (verbose_) {
+      std::cout << "  Assignment operation at line " 
+                << context_->getSourceManager().getSpellingLineNumber(binOp->getOperatorLoc()) 
+                << "\n";
+    }
+  }
+  
+  return true;
+}
+
+bool LoopVisitor::VisitUnaryOperator(UnaryOperator* unaryOp) {
+  if (!unaryOp || !isInsideLoop()) {
+    return true;
+  }
+  
+  if (unaryOp->isIncrementDecrementOp()) {
+    getCurrentLoop()->incrementArithmeticOps();
+  }
+  
+  return true;
+}
+
+bool LoopVisitor::VisitCallExpr(CallExpr* callExpr) {
+    if (!callExpr || !isInsideLoop()) {
+        return true;
+    }
+    
+    LoopInfo* currentLoop = getCurrentLoop();
+    currentLoop->incrementFunctionCalls();
+    
+    if (verbose_) {
+      std::cout << " Function call at line "
+                << context_->getSourceManager().getSpellingLineNumber(callExpr->getBeginLoc())
+                << "\n";
+    }
+    
+    // Analyze the function call and store the result in LoopInfo
+    FunctionCallAnalyzer temp_analyzer(context_);
+    temp_analyzer.visitCallExpr(callExpr, *currentLoop);
+    
+    // Extract the function name and safety info
+    std::string func_name;
+    if (auto* funcDecl = callExpr->getDirectCallee()) {
+        if (funcDecl->getDeclName().isIdentifier()) {
+            func_name = funcDecl->getNameAsString();
+        }
+    }
+    
+    if (func_name.empty()) {
+        func_name = "unknown_function";
+    }
+    
+    // Check if it's safe using the same logic as FunctionCallAnalyzer
+    bool is_safe = true;
+    static const std::set<std::string> unsafe_functions = {
+        "printf", "fprintf", "sprintf", "puts", "putchar",
+        "scanf", "fscanf", "sscanf", "getchar", "gets", "fgets",
+        "malloc", "calloc", "realloc", "free",
+        "fopen", "fclose", "fread", "fwrite", "fseek", "ftell",
+        "exit", "abort", "system", "rand", "srand", "time"
+    };
+    
+    if (unsafe_functions.find(func_name) != unsafe_functions.end()) {
+        is_safe = false;
+    }
+    
+    // Store in LoopInfo
+    currentLoop->addDetectedFunctionCall(func_name, is_safe);
+    
+    return true;
+}
+
+void LoopVisitor::analyzeForLoopBounds(ForStmt* forLoop, LoopInfo& info) {
+    info.bounds.init_expr = nullptr;
+    info.bounds.condition_expr = forLoop->getCond();
+    info.bounds.increment_expr = forLoop->getInc();
+    
+    // Try to extract iterator variable name from initialization
+    if (auto* declStmt = dyn_cast_or_null<DeclStmt>(forLoop->getInit())) {
+        if (declStmt->isSingleDecl()) {
+            if (auto* varDecl = dyn_cast<VarDecl>(declStmt->getSingleDecl())) {
+                info.bounds.iterator_var = varDecl->getNameAsString();
+            }
+        }
+    }
+    
+    // Check for simple pattern
+    if (!info.bounds.iterator_var.empty() && info.bounds.condition_expr &&
+        info.bounds.increment_expr) {
+        info.bounds.is_simple_pattern = true;
+    }
+    
+    if (verbose_ && info.bounds.is_simple_pattern) {
+        std::cout << " Simple iterator pattern detected: "
+                  << info.bounds.iterator_var << " (depth " << info.depth << ")\n";
     }
 }
 
-// Test 11: Write-only pattern - safe
-void test_write_only() {
-    int results[300];
-    
-    for (int i = 0; i < 300; i++) {
-        results[i] = i * i * i;  // Only writing, no reads
+void LoopVisitor::markInductionVariable(LoopInfo& loop) {
+  // Mark the loop iterator as an induction variable
+  if (!loop.bounds.iterator_var.empty()) {
+    auto it = loop.variables.find(loop.bounds.iterator_var);
+    if (it != loop.variables.end()) {
+      it->second.setRole(VariableRole::INDUCTION_VAR);
+      if (verbose_) {
+        std::cout << "  Marked " << loop.bounds.iterator_var 
+                  << " as induction variable (safe for parallelization)\n";
+      }
     }
+  }
 }
 
-// Test 12: Reduction with local variable - mixed safety
-void test_reduction_local() {
-    int source[100];
-    int total = 0;
-    
-    for (int i = 0; i < 100; i++) {
-        int local = source[i] * 2;  // Local variable - safe
-        total += local;             // Reduction - dependency
-    }
+void LoopVisitor::finalizeDependencyAnalysis(LoopInfo& loop) {
+  // Pass verbose flag to dependency analyzer
+  if (dependency_analyzer_) {
+    dependency_analyzer_->setVerbose(verbose_);
+  }
+  dependency_analyzer_->analyzeDependencies(loop);
+  bool has_deps = dependency_analyzer_->hasDependencies(loop);
+  loop.setHasDependencies(has_deps);
 }
 
-int main() {
-    test_simple_safe();
-    test_loop_carried_dependency();
-    test_scalar_dependency();
-    test_pointer_operations();
-    test_function_calls();
-    test_math_functions();
-    test_complex_indexing();
-    test_cross_iteration();
-    test_nested_loops();
-    test_pointer_aliasing();
-    test_write_only();
-    test_reduction_local();
+bool LoopVisitor::VisitArraySubscriptExpr(ArraySubscriptExpr* arrayExpr) {
+    if (!arrayExpr || !isInsideLoop()) {
+        return true;
+    }
     
+    const std::string arrayName = extractArrayBaseName(arrayExpr);
+    SourceLocation loc = arrayExpr->getExprLoc();
+    SourceManager& sm = context_->getSourceManager();
+    unsigned line = sm.getSpellingLineNumber(loc);
+    
+    // Determine if this is a write access by checking parent context
+    bool is_write = false;
+    auto parents = context_->getParents(*arrayExpr);
+    for (const auto& parent : parents) {
+        if (auto* binaryOp = parent.get<BinaryOperator>()) {
+            // Check if this array access is the LHS of an assignment
+            if (binaryOp->isAssignmentOp() && binaryOp->getLHS() == arrayExpr) {
+                is_write = true;
+                break;
+            }
+        }
+    }
+    
+    // Create ArrayAccess with proper write/read flag and subscript
+    ArrayAccess access(arrayName, arrayExpr->getIdx(), loc, line, is_write);
+    getCurrentLoop()->addArrayAccess(access);
+    
+    if (verbose_) {
+      // Show the actual subscript expression for debugging
+      std::string subscript_str = "unknown";
+      if (arrayExpr->getIdx()) {
+          // Use the same exprToString logic as ArrayDependencyAnalyzer
+          Expr* idx = arrayExpr->getIdx()->IgnoreParenImpCasts();
+          if (auto* declRef = dyn_cast<DeclRefExpr>(idx)) {
+              subscript_str = declRef->getDecl()->getNameAsString();
+          } else if (auto* binOp = dyn_cast<BinaryOperator>(idx)) {
+              // Handle expressions like i-1, i+1
+              if (auto* lhs = dyn_cast<DeclRefExpr>(binOp->getLHS())) {
+                  if (auto* rhs = dyn_cast<IntegerLiteral>(binOp->getRHS())) {
+                      std::string var = lhs->getDecl()->getNameAsString();
+                      int constant = rhs->getValue().getSExtValue();
+                      if (binOp->getOpcode() == BO_Add) {
+                          subscript_str = var + "+" + std::to_string(constant);
+                      } else if (binOp->getOpcode() == BO_Sub) {
+                          subscript_str = var + "-" + std::to_string(constant);
+                      }
+                  }
+              }
+          } else if (auto* intLit = dyn_cast<IntegerLiteral>(idx)) {
+              subscript_str = std::to_string(intLit->getValue().getSExtValue());
+          }
+      }
+      
+      std::cout << " Found array access: " << arrayName << "[" << subscript_str << "] at line " << line
+                << " (" << (is_write ? "WRITE" : "READ") << ")"
+                << " (depth " << getCurrentLoop()->depth << ")\n";
+    }
+    
+    return true;
+}
+
+std::string LoopVisitor::extractArrayBaseName(ArraySubscriptExpr* arrayExpr) {
+  Expr* base = arrayExpr->getBase()->IgnoreParenImpCasts();
+
+  // For multi-dimensional arrays, traverse down to base
+  while (auto* innerArray = dyn_cast<ArraySubscriptExpr>(base)) {
+    base = innerArray->getBase()->IgnoreParenImpCasts();
+  }
+
+  if (auto* declRef = dyn_cast<DeclRefExpr>(base)) {
+    return declRef->getDecl()->getNameAsString();
+  }
+
+  return "unknown";
+}
+
+bool LoopVisitor::isWriteAccess(DeclRefExpr* declRef) {
+  // Look at parent nodes to determine if this is a write access
+  auto parents = context_->getParents(*declRef);
+  
+  for (const auto& parent : parents) {
+    if (auto* binaryOp = parent.get<BinaryOperator>()) {
+      // Check if this declRef is the LHS of an assignment
+      if (binaryOp->isAssignmentOp() && binaryOp->getLHS() == declRef) {
+        return true;
+      }
+    } else if (auto* unaryOp = parent.get<UnaryOperator>()) {
+      // Check for increment/decrement operators
+      if (unaryOp->isIncrementDecrementOp()) {
+        return true;
+      }
+    } else if (auto* compoundAssign = parent.get<CompoundAssignOperator>()) {
+      // +=, -=, *=, etc.
+      if (compoundAssign->getLHS() == declRef) {
+        return true;
+      }
+    }
+  }
+  
+  return false; // Default to read access
+}
+
+bool LoopVisitor::isArithmeticOp(BinaryOperator* binOp) {
+  return binOp->isAdditiveOp() || binOp->isMultiplicativeOp();
+}
+
+bool LoopVisitor::isComparisonOp(BinaryOperator* binOp) {
+  return binOp->isComparisonOp();
+}
+
+VariableScope LoopVisitor::determineVariableScope(VarDecl* varDecl) const {
+  // Simple heuristic for now - we can improve this later
+  if (!varDecl) {
+    return VariableScope::GLOBAL;
+  }
+
+  // Check if declared within current loop body (rough approximation)
+  SourceManager& sm = context_->getSourceManager();
+  SourceLocation declLoc = varDecl->getLocation();
+  
+  if (!isInsideLoop()) {
+    return VariableScope::FUNCTION_LOCAL;
+  }
+  
+  // For now, assume variables found while traversing loop are loop-local
+  // This is a simplification - real implementation would check scopes more carefully
+  return VariableScope::LOOP_LOCAL;
+}
+
+void LoopVisitor::addLoop(Stmt* stmt, SourceLocation loc,
+                          const std::string& type) {
+  if (!loc.isValid()) {
+    std::cout << "Warning: Invalid source location for " << type << " loop\n";
+    return;
+  }
+
+  SourceManager& sm = context_->getSourceManager();
+  unsigned line = sm.getSpellingLineNumber(loc);
+
+  loops_.emplace_back(stmt, loc, line, type);
+
+  unsigned depth = static_cast<unsigned>(loop_stack_.size());
+  if (verbose_) {
+    std::cout << "Found " << type << " loop at line " << line << " (depth "
+                << depth << ")\n";
+  }
+}
+
+void LoopVisitor::printLoopSummary() const {
+    std::cout << "\n=== Analysis Results ===\n";
+    
+    if (loops_.empty()) {
+        std::cout << "No loops detected in the analyzed code.\n";
+        return;
+    }
+    
+    // Print table header
+    std::cout << "Loop   Location    Type     Status          Reason\n";
+    std::cout << "----   --------    ----     ------          ------\n";
+    
+    size_t parallelizable_count = 0;
+    
+    for (size_t i = 0; i < loops_.size(); i++) {
+        const auto& loop = loops_[i];
+        
+        // Format: L1     line 6      for      PARALLELIZABLE  Simple array operations
+        std::cout << "L" << (i + 1);
+        
+        // Pad to align columns
+        std::cout << "     line " << loop.line_number;
+        if (loop.line_number < 10) std::cout << " ";  // Extra space for single digits
+        
+        std::cout << "     " << loop.loop_type;
+        if (loop.loop_type.length() < 5) std::cout << " ";  // Pad short types
+        
+        // Determine status and reason
+        std::string status, reason;
+        if (loop.isParallelizable()) {
+            status = "PARALLELIZABLE";
+            parallelizable_count++;
+            
+            // Determine why it's safe
+            if (loop.bounds.is_simple_pattern && !loop.array_accesses.empty()) {
+                reason = "Simple array operations";
+            } else if (loop.bounds.is_simple_pattern) {
+                reason = "Simple iterator pattern";
+            } else {
+                reason = "No dependencies detected";
+            }
+        } else {
+            status = "UNSAFE";
+            
+            // Determine why it's unsafe
+            bool has_array_deps = false;
+            bool has_function_calls = false;
+            
+            // Check if this loop has unsafe function calls
+            if (loop.hasUnsafeFunctionCalls()) {
+                has_function_calls = true;
+            }
+            
+            // Check if this loop has array dependencies (we'd need to check the actual dependencies)
+            // For now, we'll infer from the other conditions
+            if (!has_function_calls && loop.has_dependencies) {
+                has_array_deps = true;
+            }
+            
+            if (has_function_calls && has_array_deps) {
+                reason = "Function calls + dependencies";
+            } else if (has_function_calls) {
+                reason = "Function call side effects";
+            } else if (has_array_deps) {
+                reason = "Loop-carried dependency";
+            } else {
+                reason = "Complex dependencies";
+            }
+        }
+        
+        std::cout << "     " << status;
+        
+        // Pad status column
+        for (int pad = status.length(); pad < 15; pad++) {
+            std::cout << " ";
+        }
+        
+        std::cout << " " << reason << "\n";
+    }
+    
+    // Summary line
+    std::cout << "\nParallelizable: " << parallelizable_count << "/" << loops_.size() 
+              << " loops (" << (loops_.size() > 0 ? (parallelizable_count * 100 / loops_.size()) : 0) << "%)\n";
+}
+
+} // namespace statik#include "analyzer/PointerAnalyzer.h"
+#include "clang/AST/Type.h"
+#include "clang/Basic/SourceManager.h"
+#include <iostream>
+
+using namespace clang;
+
+namespace statik {
+
+void PointerAnalyzer::analyzePointerUsage(LoopInfo& loop) {
+  pointer_ops_.clear();
+  detected_pointers_.clear();
+  
+  if (verbose_) {
+    std::cout << "  Analyzing pointer usage in loop at line " 
+             << loop.line_number << "\n";
+  }
+  
+  // The actual pointer detection happens through the visitor methods
+  // called from LoopVisitor and this method summarizes the results
+  
+  PointerRisk risk = getPointerRisk(loop);
+  
+  if (verbose_) {
+    switch (risk) {
+      case PointerRisk::SAFE:
+        std::cout << "  No pointer operations detected\n";
+        break;
+      case PointerRisk::POTENTIAL_ALIAS:
+        std::cout << "  Pointer operations detected - potential aliasing risk\n";
+        break;
+      case PointerRisk::UNSAFE:
+        std::cout << "  Complex pointer operations - unsafe for parallelization\n";
+        break;
+    }
+  }
+}
+
+PointerRisk PointerAnalyzer::getPointerRisk(const LoopInfo& loop) const {
+  if (pointer_ops_.empty()) {
+    return PointerRisk::SAFE;
+  }
+  
+  // Check for complex patterns that are definitely unsafe
+  if (hasComplexPointerArithmetic() || hasMultiplePointerDereferences()) {
+    return PointerRisk::UNSAFE;
+  }
+  
+  // Any pointer dereferences are potentially risky due to aliasing
+  for (const auto& op : pointer_ops_) {
+    if (op.is_dereference) {
+      return PointerRisk::POTENTIAL_ALIAS;
+    }
+  }
+  
+  return PointerRisk::SAFE;
+}
+
+void PointerAnalyzer::visitUnaryOperator(UnaryOperator* unaryOp, LoopInfo& loop) {
+  if (!unaryOp) {
+    return;
+  }
+  
+  SourceLocation loc = unaryOp->getOperatorLoc();
+  SourceManager& sm = context_->getSourceManager();
+  unsigned line = sm.getSpellingLineNumber(loc);
+  
+  switch (unaryOp->getOpcode()) {
+    case UO_Deref: { // *ptr
+      std::string ptrName = extractPointerName(unaryOp->getSubExpr());
+      if (!ptrName.empty()) {
+        recordPointerOperation(ptrName, loc, true, false, false);
+        if (verbose_) {
+          std::cout << "  Pointer dereference: *" << ptrName 
+                   << " at line " << line << "\n";
+        }
+      }
+      break;
+    }
+    case UO_AddrOf: { // &var
+      std::string varName = extractPointerName(unaryOp->getSubExpr());
+      if (!varName.empty()) {
+        recordPointerOperation(varName, loc, false, true, false);
+        if (verbose_) {
+          std::cout << "  Address-of operation: &" << varName 
+                   << " at line " << line << "\n";
+        }
+      }
+      break;
+    }
+    case UO_PreInc:
+    case UO_PostInc:
+    case UO_PreDec:
+    case UO_PostDec: {
+      // Check if incrementing/decrementing a pointer
+      if (isPointerType(unaryOp->getSubExpr()->getType())) {
+        std::string ptrName = extractPointerName(unaryOp->getSubExpr());
+        if (!ptrName.empty()) {
+          recordPointerOperation(ptrName, loc, false, false, true);
+          if (verbose_) {
+            std::cout << "  Pointer arithmetic: " << ptrName 
+                     << "++ at line " << line << "\n";
+          }
+        }
+      }
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+void PointerAnalyzer::visitBinaryOperator(BinaryOperator* binOp, LoopInfo& loop) {
+  if (!binOp) {
+    return;
+  }
+  
+  // Check for pointer arithmetic: ptr + offset, ptr - offset
+  Expr* lhs = binOp->getLHS();
+  Expr* rhs = binOp->getRHS();
+  
+  if (binOp->getOpcode() == BO_Add || binOp->getOpcode() == BO_Sub) {
+    // Check if left operand is a pointer
+    if (isPointerType(lhs->getType())) {
+      std::string ptrName = extractPointerName(lhs);
+      if (!ptrName.empty()) {
+        SourceLocation loc = binOp->getOperatorLoc();
+        recordPointerOperation(ptrName, loc, false, false, true);
+        
+        if (verbose_) {
+          SourceManager& sm = context_->getSourceManager();
+          unsigned line = sm.getSpellingLineNumber(loc);
+          std::cout << "  Pointer arithmetic: " << ptrName 
+                   << " +/- offset at line " << line << "\n";
+        }
+      }
+    }
+  }
+  
+  // Check for pointer assignments that might create aliasing
+  if (binOp->isAssignmentOp()) {
+    if (isPointerType(lhs->getType()) && isPointerType(rhs->getType())) {
+      std::string lhsName = extractPointerName(lhs);
+      std::string rhsName = extractPointerName(rhs);
+      
+      if (!lhsName.empty() && !rhsName.empty()) {
+        if (verbose_) {
+          SourceLocation loc = binOp->getOperatorLoc();
+          SourceManager& sm = context_->getSourceManager();
+          unsigned line = sm.getSpellingLineNumber(loc);
+          
+          std::cout << "  Pointer assignment: " << lhsName << " = " << rhsName 
+                   << " at line " << line << " (potential aliasing)\n";
+        }
+      }
+    }
+  }
+}
+
+void PointerAnalyzer::visitMemberExpr(MemberExpr* memberExpr, LoopInfo& loop) {
+  if (!memberExpr) {
+    return;
+  }
+  
+  // Check for struct/class member access through pointers
+  if (memberExpr->isArrow()) { // ptr->member
+    std::string ptrName = extractPointerName(memberExpr->getBase());
+    if (!ptrName.empty()) {
+      SourceLocation loc = memberExpr->getMemberLoc();
+      recordPointerOperation(ptrName, loc, true, false, false);
+      
+      if (verbose_) {
+        SourceManager& sm = context_->getSourceManager();
+        unsigned line = sm.getSpellingLineNumber(loc);
+        std::cout << "  Pointer member access: " << ptrName 
+                 << "->member at line " << line << "\n";
+      }
+    }
+  }
+}
+
+bool PointerAnalyzer::isPointerType(QualType type) {
+  return type->isPointerType() || type->isArrayType();
+}
+
+std::string PointerAnalyzer::extractPointerName(Expr* expr) {
+  if (!expr) {
+    return "";
+  }
+  
+  // Use instance method with recursion limit to prevent infinite loops
+  return extractPointerNameRecursive(expr, 0);
+}
+
+std::string PointerAnalyzer::extractPointerNameRecursive(Expr* expr, int depth) {
+  // Prevent infinite recursion
+  if (depth > 10) {
+    return "complex_expr";
+  }
+  
+  if (!expr) {
+    return "";
+  }
+  
+  expr = expr->IgnoreParenImpCasts();
+  
+  if (auto* declRef = dyn_cast<DeclRefExpr>(expr)) {
+    return declRef->getDecl()->getNameAsString();
+  } else if (auto* arrayExpr = dyn_cast<ArraySubscriptExpr>(expr)) {
+    return extractPointerNameRecursive(arrayExpr->getBase(), depth + 1);
+  } else if (auto* binOp = dyn_cast<BinaryOperator>(expr)) {
+    // Handle pointer arithmetic like ptr + offset
+    if (binOp->getOpcode() == BO_Add || binOp->getOpcode() == BO_Sub) {
+      std::string lhs = extractPointerNameRecursive(binOp->getLHS(), depth + 1);
+      if (!lhs.empty() && lhs != "complex_expr") {
+        return lhs + "_offset";
+      } else {
+        return "complex_expr";
+      }
+    } else {
+      return "complex_expr";
+    }
+  } else if (auto* unaryOp = dyn_cast<UnaryOperator>(expr)) {
+    // Handle unary operations like *ptr, &var
+    return extractPointerNameRecursive(unaryOp->getSubExpr(), depth + 1);
+  } else {
+    return "complex_expr";
+  }
+}
+
+void PointerAnalyzer::recordPointerOperation(const std::string& name, 
+                                           SourceLocation loc,
+                                           bool deref, bool addr, bool arith) {
+  SourceManager& sm = context_->getSourceManager();
+  unsigned line = sm.getSpellingLineNumber(loc);
+  
+  pointer_ops_.emplace_back(name, loc, line, deref, addr, arith);
+  detected_pointers_.insert(name);
+}
+
+bool PointerAnalyzer::hasComplexPointerArithmetic() const {
+  int arithmetic_ops = 0;
+  for (const auto& op : pointer_ops_) {
+    if (op.is_arithmetic) {
+      arithmetic_ops++;
+    }
+  }
+  
+  // More than 2 pointer arithmetic operations is getting complex
+  return arithmetic_ops > 2;
+}
+
+bool PointerAnalyzer::hasMultiplePointerDereferences() const {
+  int dereference_count = 0;
+  for (const auto& op : pointer_ops_) {
+    if (op.is_dereference) {
+      dereference_count++;
+    }
+  }
+  
+  // Multiple pointer dereferences suggest complex data structures
+  return dereference_count > 3;
+}
+
+} // namespace statik#include "analyzer/PragmaGenerator.h"
+#include <iostream>
+#include <algorithm>
+
+namespace statik {
+
+void PragmaGenerator::generatePragmasForLoops(const std::vector<LoopInfo>& loops) {
+  generated_pragmas_.clear();
+  
+  std::cout << "\n=== Generating OpenMP Pragmas ===\n";
+  
+  for (const auto& loop : loops) {
+    PragmaType pragma_type = determinePragmaType(loop);
+    
+    if (pragma_type != PragmaType::NO_PRAGMA) {
+      std::string pragma_text = generatePragmaText(pragma_type, loop);
+      std::string reasoning = generateReasoning(pragma_type, loop);
+      
+      GeneratedPragma pragma(pragma_type, pragma_text, loop.loop_type, 
+                           loop.line_number, reasoning);
+      
+      // Check if we need private variable clauses
+      std::vector<std::string> private_vars = identifyPrivateVariables(loop);
+      if (!private_vars.empty()) {
+        pragma.requires_private_vars = true;
+        pragma.private_variables = private_vars;
+        // Add private clause to pragma text
+        pragma.pragma_text += " private(";
+        for (size_t i = 0; i < private_vars.size(); i++) {
+          if (i > 0) pragma.pragma_text += ", ";
+          pragma.pragma_text += private_vars[i];
+        }
+        pragma.pragma_text += ")";
+      }
+      
+      // Calculate confidence score BEFORE adding to vector
+      if (confidence_scorer_) {
+        pragma.confidence = confidence_scorer_->calculateConfidence(loop, pragma);
+      } else {
+        // Fallback if confidence scorer is not initialized
+        pragma.confidence.numerical_score = 0.5;
+        pragma.confidence.level = ConfidenceLevel::MEDIUM;
+        pragma.confidence.reasoning = "Confidence scorer not available";
+      }
+      
+      generated_pragmas_.push_back(pragma);
+      
+      std::cout << "  Generated pragma for " << loop.loop_type 
+               << " loop at line " << loop.line_number << ":\n";
+      std::cout << "    " << pragma.pragma_text << "\n";
+      std::cout << "    Reasoning: " << reasoning << "\n";
+      
+      if (confidence_scorer_) {
+        std::cout << "    Confidence: " << confidence_scorer_->getConfidenceDescription(pragma.confidence.level)
+                 << " (" << static_cast<int>(pragma.confidence.numerical_score * 100) << "%)\n";
+        std::cout << "    " << pragma.confidence.reasoning << "\n";
+      }
+    } else {
+      std::cout << "  No pragma generated for " << loop.loop_type 
+               << " loop at line " << loop.line_number 
+               << " (has dependencies)\n";
+    }
+  }
+  
+  std::cout << "===============================\n";
+}
+
+PragmaType PragmaGenerator::determinePragmaType(const LoopInfo& loop) {
+  // Only generate pragmas for parallelizable loops
+  if (loop.has_dependencies) {
+    return PragmaType::NO_PRAGMA;
+  }
+  
+  // For nested loops, be more conservative
+  if (loop.depth > 0) {
+    // Inner loops with simple array access might benefit from SIMD
+    if (shouldUseSimd(loop)) {
+      return PragmaType::SIMD;
+    }
+    return PragmaType::NO_PRAGMA;  // Conservative for nested loops
+  }
+  
+  // For outermost loops, check if SIMD is beneficial
+  if (shouldUseSimd(loop)) {
+    return PragmaType::PARALLEL_FOR_SIMD;
+  }
+  
+  // Default to parallel for
+  return PragmaType::PARALLEL_FOR;
+}
+
+std::string PragmaGenerator::generatePragmaText(PragmaType type, const LoopInfo& loop) {
+  switch (type) {
+    case PragmaType::PARALLEL_FOR:
+      return "#pragma omp parallel for";
+    case PragmaType::PARALLEL_FOR_SIMD:
+      return "#pragma omp parallel for simd";
+    case PragmaType::SIMD:
+      return "#pragma omp simd";
+    case PragmaType::NO_PRAGMA:
+    default:
+      return "";
+  }
+}
+
+std::string PragmaGenerator::generateReasoning(PragmaType type, const LoopInfo& loop) {
+  std::string reason;
+  
+  switch (type) {
+    case PragmaType::PARALLEL_FOR:
+      reason = "Loop has no dependencies and good parallelization potential";
+      break;
+    case PragmaType::PARALLEL_FOR_SIMD:
+      reason = "Loop has simple array operations suitable for both parallelization and vectorization";
+      break;
+    case PragmaType::SIMD:
+      reason = "Inner loop with simple operations suitable for vectorization";
+      break;
+    case PragmaType::NO_PRAGMA:
+    default:
+      reason = "Loop has dependencies or is not suitable for parallelization";
+      break;
+  }
+  
+  // Add specific details about why this loop is good for parallelization
+  if (type != PragmaType::NO_PRAGMA) {
+    if (loop.bounds.is_simple_pattern) {
+      reason += " (simple iterator pattern)";
+    }
+    if (loop.isHot()) {
+      reason += " (high computational intensity)";
+    }
+  }
+  
+  return reason;
+}
+
+bool PragmaGenerator::shouldUseSimd(const LoopInfo& loop) {
+  // SIMD is beneficial for loops with:
+  // 1. Simple array access patterns
+  // 2. Arithmetic operations
+  // 3. No function calls (or only math functions)
+  
+  if (!hasSimpleArrayAccess(loop)) {
+    return false;
+  }
+  
+  // Check if loop has primarily arithmetic operations
+  if (loop.metrics.arithmetic_ops > loop.metrics.function_calls * 2) {
+    return true;
+  }
+  
+  // For inner loops, be more aggressive with SIMD
+  if (isInnerLoop(loop) && loop.metrics.memory_accesses > 0) {
+    return true;
+  }
+  
+  return false;
+}
+
+bool PragmaGenerator::hasSimpleArrayAccess(const LoopInfo& loop) {
+  // Check if array accesses use simple patterns like A[i], B[i]
+  for (const auto& access : loop.array_accesses) {
+    // For now, assume most array accesses in parallelizable loops are simple
+    // A more sophisticated check would analyze the subscript expressions
+  }
+  
+  // If we have array accesses and the loop is parallelizable, 
+  // assume they're simple enough
+  return !loop.array_accesses.empty();
+}
+
+bool PragmaGenerator::isInnerLoop(const LoopInfo& loop) {
+  // An inner loop has children but is not at depth 0
+  return loop.depth > 0;
+}
+
+std::vector<std::string> PragmaGenerator::identifyPrivateVariables(const LoopInfo& loop) {
+  std::vector<std::string> private_vars;
+  
+  for (const auto& var_pair : loop.variables) {
+    const auto& var = var_pair.second;
+    
+    // Skip induction variables - they're automatically private
+    if (var.isInductionVariable()) {
+      continue;
+    }
+    
+    // Variables that are only written or declared inside the loop
+    // should be private
+    if (var.scope == VariableScope::LOOP_LOCAL && var.hasWrites()) {
+      private_vars.push_back(var.name);
+    }
+  }
+  
+  return private_vars;
+}
+
+void PragmaGenerator::printPragmaSummary() const {
+  std::cout << "\n=== Pragma Generation Summary ===\n";
+  std::cout << "Total pragmas generated: " << generated_pragmas_.size() << "\n\n";
+  
+  int parallel_for_count = 0;
+  int parallel_for_simd_count = 0;
+  int simd_count = 0;
+  double avg_confidence = 0.0;
+  
+  for (const auto& pragma : generated_pragmas_) {
+    switch (pragma.type) {
+      case PragmaType::PARALLEL_FOR:
+        parallel_for_count++;
+        break;
+      case PragmaType::PARALLEL_FOR_SIMD:
+        parallel_for_simd_count++;
+        break;
+      case PragmaType::SIMD:
+        simd_count++;
+        break;
+      default:
+        break;
+    }
+    
+    avg_confidence += pragma.confidence.numerical_score;
+    
+    std::cout << "Line " << pragma.line_number << ": " << pragma.pragma_text;
+    if (pragma.requires_private_vars) {
+      std::cout << " (with private variables)";
+    }
+    
+    if (confidence_scorer_) {
+      std::cout << " [Confidence: " 
+               << confidence_scorer_->getConfidenceDescription(pragma.confidence.level) << "]\n";
+    } else {
+      std::cout << " [Confidence: N/A]\n";
+    }
+  }
+  
+  if (!generated_pragmas_.empty()) {
+    avg_confidence /= generated_pragmas_.size();
+  }
+  
+  std::cout << "\nBreakdown:\n";
+  std::cout << "  #pragma omp parallel for: " << parallel_for_count << "\n";
+  std::cout << "  #pragma omp parallel for simd: " << parallel_for_simd_count << "\n";
+  std::cout << "  #pragma omp simd: " << simd_count << "\n";
+  std::cout << "  Average confidence: " << static_cast<int>(avg_confidence * 100) << "%\n";
+  std::cout << "================================\n";
+}
+
+} // namespace statik#include "analyzer/PragmaLocationMapper.h"
+#include "clang/AST/Stmt.h"
+#include <iostream>
+#include <fstream>
+
+using namespace clang;
+
+namespace statik {
+
+void PragmaLocationMapper::mapLoopToPragmaLocation(const LoopInfo& loop) {
+  std::cout << "  Mapping pragma insertion point for " << loop.loop_type 
+           << " loop at line " << loop.line_number << "\n";
+  
+  // Find the best location to insert the pragma (usually before the loop)
+  SourceLocation pragma_loc = findPragmaInsertionLocation(loop.stmt);
+  
+  if (pragma_loc.isInvalid()) {
+    std::cout << "  Warning: Could not determine pragma insertion location\n";
+    return;
+  }
+  
+  // Skip loops in macro expansions - too risky to modify
+  if (isLocationInMacro(pragma_loc)) {
+    std::cout << "  Skipping loop in macro expansion\n";
+    return;
+  }
+  
+  // Get both spelling and expansion line numbers for comparison
+  unsigned spelling_line = source_manager_->getSpellingLineNumber(pragma_loc);
+  unsigned expansion_line = source_manager_->getExpansionLineNumber(pragma_loc);
+  
+  if (spelling_line != expansion_line) {
+    std::cout << "  Note: Line number mismatch due to preprocessor (spelling: " 
+             << spelling_line << ", expansion: " << expansion_line << ")\n";
+  }
+  
+  // Use spelling line number for accurate source location
+  unsigned line = spelling_line;
+  unsigned col = getColumnNumber(pragma_loc);
+  
+  PragmaInsertionPoint point(pragma_loc, line, col, loop.loop_type,
+                           loop.depth > 0, loop.depth);
+  
+  insertion_points_.push_back(point);
+  
+  std::cout << "  Pragma insertion point: line " << line << ", column " << col;
+  if (loop.depth > 0) {
+    std::cout << " (nested depth " << loop.depth << ")";
+  }
+  std::cout << "\n";
+}
+
+SourceLocation PragmaLocationMapper::findPragmaInsertionLocation(Stmt* loop_stmt) {
+  if (!loop_stmt) {
+    return SourceLocation();
+  }
+  
+  SourceLocation loop_start = loop_stmt->getBeginLoc();
+  if (loop_start.isInvalid()) {
+    return SourceLocation();
+  }
+  
+  // Handle macro expansions and preprocessor issues
+  if (loop_start.isMacroID()) {
+    // Get the spelling location (where the text actually appears)
+    loop_start = source_manager_->getSpellingLoc(loop_start);
+    
+    if (loop_start.isInvalid()) {
+      std::cout << "  Warning: Could not resolve macro expansion location\n";
+      return SourceLocation();
+    }
+  }
+  
+  // Try to move to the beginning of the line containing the loop
+  SourceLocation line_start = moveToStartOfLine(loop_start);
+  
+  // Check if there are preprocessor directives on the line before
+  // If so, we need to insert after them
+  unsigned line_num = source_manager_->getSpellingLineNumber(line_start);
+  if (line_num > 1) {
+    // Check the previous line for preprocessor directives
+    SourceLocation prev_line = source_manager_->translateLineCol(
+        source_manager_->getFileID(line_start), line_num - 1, 1);
+    
+    if (prev_line.isValid()) {
+      // For now, use the current line start
+      // A more sophisticated approach would parse preprocessor directives
+      return line_start;
+    }
+  }
+  
+  return line_start;
+}
+
+unsigned PragmaLocationMapper::getColumnNumber(SourceLocation loc) {
+  if (loc.isInvalid()) {
     return 0;
-}#include <stdio.h>
-#include <math.h>
+  }
+  
+  return source_manager_->getSpellingColumnNumber(loc);
+}
 
-// Test 1: Simple parallel for candidate - should get high confidence
-void test_simple_parallel() {
-    int a[1000], b[1000], c[1000];
+bool PragmaLocationMapper::isLocationInMacro(SourceLocation loc) {
+  if (loc.isInvalid()) {
+    return false;
+  }
+  
+  // Check if this location is from a macro expansion
+  return loc.isMacroID();
+}
+
+std::string PragmaLocationMapper::getIndentationAtLocation(SourceLocation loc) {
+  if (loc.isInvalid()) {
+    return "";
+  }
+  
+  // Get the line start and read characters until we hit non-whitespace
+  SourceLocation line_start = moveToStartOfLine(loc);
+  
+  // This is a simplified approach - a real implementation would
+  // read the source file and analyze the actual indentation
+  
+  // For now, return a reasonable default indentation
+  return "    "; // 4 spaces
+}
+
+SourceLocation PragmaLocationMapper::moveToStartOfLine(SourceLocation loc) {
+  if (loc.isInvalid()) {
+    return loc;
+  }
+  
+  // For now, we'll use the given location as a reasonable approximation
+  // In practice, Clang's Lexer class has better methods for this
+  unsigned line = source_manager_->getSpellingLineNumber(loc);
+  FileID file_id = source_manager_->getFileID(loc);
+  
+  // Try to get location at column 1 of the same line
+  SourceLocation line_start = source_manager_->translateLineCol(file_id, line, 1);
+  
+  return line_start.isValid() ? line_start : loc;
+}
+
+} // namespace statik#include "analyzer/SourceAnnotator.h"
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include <algorithm>
+#include <map>
+
+namespace statik {
+
+void SourceAnnotator::annotateSourceWithPragmas(const std::string& input_filename,
+                                               const std::vector<GeneratedPragma>& pragmas,
+                                               const std::vector<PragmaInsertionPoint>& insertion_points) {
+  std::cout << "\n=== Annotating Source with OpenMP Pragmas ===\n";
+  std::cout << "Input file: " << input_filename << "\n";
+  
+  if (!readSourceFile(input_filename)) {
+    std::cout << "Error: Could not read source file\n";
+    return;
+  }
+  
+  insertPragmaAnnotations(pragmas, insertion_points);
+  
+  std::cout << "Annotation complete. Found " << pragmas.size() 
+           << " pragmas to insert.\n";
+  std::cout << "============================================\n";
+}
+
+bool SourceAnnotator::writeAnnotatedFile(const std::string& output_filename) {
+  std::ofstream outfile(output_filename);
+  if (!outfile.is_open()) {
+    std::cout << "Error: Could not create output file " << output_filename << "\n";
+    return false;
+  }
+  
+  std::cout << "\nWriting annotated source to: " << output_filename << "\n";
+  
+  for (const auto& line : annotated_lines_) {
+    // Write pragma annotation first (if any)
+    if (line.has_pragma) {
+      outfile << line.pragma_annotation << "\n";
+    }
     
-    for (int i = 0; i < 1000; i++) {
-        c[i] = a[i] + b[i];  // Simple, independent operations
+    // Write original line
+    outfile << line.original_content << "\n";
+  }
+  
+  outfile.close();
+  std::cout << "Successfully wrote " << annotated_lines_.size() 
+           << " lines to output file\n";
+  
+  return true;
+}
+
+void SourceAnnotator::printAnnotationSummary() const {
+  std::cout << "\n=== Annotation Summary ===\n";
+  
+  int pragma_count = 0;
+  for (const auto& line : annotated_lines_) {
+    if (line.has_pragma) {
+      pragma_count++;
+      std::cout << "Line " << line.line_number << ": " 
+               << line.pragma_annotation << "\n";
+    }
+  }
+  
+  std::cout << "Total pragmas inserted: " << pragma_count << "\n";
+  std::cout << "=========================\n";
+}
+
+bool SourceAnnotator::readSourceFile(const std::string& filename) {
+  std::ifstream file(filename);
+  if (!file.is_open()) {
+    return false;
+  }
+  
+  annotated_lines_.clear();
+  input_file_ = filename;
+  
+  std::string line;
+  unsigned line_number = 1;
+  
+  while (std::getline(file, line)) {
+    annotated_lines_.emplace_back(line_number, line);
+    line_number++;
+  }
+  
+  file.close();
+  
+  std::cout << "Read " << annotated_lines_.size() << " lines from " << filename << "\n";
+  return true;
+}
+
+void SourceAnnotator::insertPragmaAnnotations(const std::vector<GeneratedPragma>& pragmas,
+                                             const std::vector<PragmaInsertionPoint>& insertion_points) {
+  // Create a map of line numbers to pragmas for quick lookup
+  std::map<unsigned, std::string> pragma_map;
+  
+  for (const auto& pragma : pragmas) {
+    // Find the corresponding insertion point for this pragma
+    auto insertion_it = std::find_if(insertion_points.begin(), insertion_points.end(),
+        [&pragma](const PragmaInsertionPoint& point) {
+            return point.line_number == pragma.line_number;
+        });
+    
+    if (insertion_it != insertion_points.end()) {
+      std::string indentation = getIndentationForLine(pragma.line_number);
+      std::string full_pragma = indentation + pragma.pragma_text;
+      pragma_map[pragma.line_number] = full_pragma;
+    }
+  }
+  
+  // Apply pragmas to the appropriate lines
+  for (auto& line : annotated_lines_) {
+    auto pragma_it = pragma_map.find(line.line_number);
+    if (pragma_it != pragma_map.end()) {
+      line.has_pragma = true;
+      line.pragma_annotation = pragma_it->second;
+      
+      std::cout << "  Inserting pragma at line " << line.line_number 
+               << ": " << pragma_it->second << "\n";
+    }
+  }
+}
+
+std::string SourceAnnotator::getIndentationForLine(unsigned line_number) {
+  // Find the line and extract its indentation
+  for (const auto& line : annotated_lines_) {
+    if (line.line_number == line_number) {
+      std::string content = line.original_content;
+      size_t first_non_space = content.find_first_not_of(" \t");
+      
+      if (first_non_space == std::string::npos) {
+        // Empty line or only whitespace
+        return "    "; // Default indentation
+      }
+      
+      return content.substr(0, first_non_space);
+    }
+  }
+  
+  return "    "; // Default indentation if line not found
+}
+
+std::string SourceAnnotator::generateOutputFilename(const std::string& input_filename) {
+  // Generate output filename by adding "_openmp" before the extension
+  size_t dot_pos = input_filename.find_last_of('.');
+  
+  if (dot_pos != std::string::npos) {
+    std::string base = input_filename.substr(0, dot_pos);
+    std::string extension = input_filename.substr(dot_pos);
+    return base + "_openmp" + extension;
+  } else {
+    return input_filename + "_openmp";
+  }
+}
+
+} // namespace statik#include <iostream>
+#include <string>
+#include <memory>
+#include <fstream>
+#include "clang/Tooling/Tooling.h"
+#include "clang/Tooling/CommonOptionsParser.h"
+#include "clang/Frontend/FrontendActions.h"
+#include "clang/Frontend/CompilerInstance.h"
+#include "analyzer/ASTVisitor.h"
+
+using namespace clang;
+using namespace clang::tooling;
+
+// Global flags
+bool generate_pragmas = false;
+bool verbose_mode = false;
+std::string output_filename;
+
+std::string generateOutputFilename(const std::string& input_file) {
+    // Find the last dot to get the extension
+    size_t dot_pos = input_file.find_last_of('.');
+    if (dot_pos != std::string::npos) {
+        std::string base = input_file.substr(0, dot_pos);
+        std::string extension = input_file.substr(dot_pos);
+        return base + "_openmp" + extension;
+    } else {
+        return input_file + "_openmp";
     }
 }
 
-// Test 2: SIMD candidate - should get parallel for simd pragma
-void test_simd_candidate() {
-    double data[500];
-    double results[500];
+class AnalyzerAction : public ASTFrontendAction {
+private:
+    bool generate_pragmas_;
+    std::string output_filename_;
+    std::string input_filename_;
+    bool verbose_;
     
-    for (int j = 0; j < 500; j++) {
-        results[j] = data[j] * data[j] + sin(data[j]);  // Arithmetic + math function
+public:
+    AnalyzerAction(bool gen_pragmas = false, const std::string& output = "", 
+                   const std::string& input = "", bool verbose = false)
+        : generate_pragmas_(gen_pragmas), output_filename_(output), 
+          input_filename_(input), verbose_(verbose) {}
+    
+    bool BeginSourceFileAction(CompilerInstance& compiler) override {
+        // Suppress compilation diagnostics
+        DiagnosticsEngine &diags = compiler.getDiagnostics();
+        diags.setSuppressAllDiagnostics(true);
+        
+        return ASTFrontendAction::BeginSourceFileAction(compiler);
     }
+        
+    std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance& compiler,
+                                                   StringRef file) override {
+        auto consumer = std::make_unique<statik::AnalyzerConsumer>(&compiler.getASTContext());
+        
+        if (generate_pragmas_) {
+            consumer->enablePragmaGeneration(output_filename_, input_filename_);
+        }
+        
+        consumer->setVerbose(verbose_);
+        
+        return consumer;
+    }
+};
+
+void printUsage(const char* progName) {
+    std::cout << "Usage: " << progName << " [OPTIONS] <source_file>\n";
+    std::cout << "\nModes:\n";
+    std::cout << "  Default: Analysis only (safe, no file changes)\n";
+    std::cout << "  --generate-pragmas: Create <filename>_openmp.c with OpenMP pragmas\n";
+    std::cout << "\nOptions:\n";
+    std::cout << "  -h, --help     Show this help message\n";
+    std::cout << "  -v, --version  Show version information\n";
+    std::cout << "  --verbose      Show detailed analysis information\n";
+    std::cout << "\nExamples:\n";
+    std::cout << "  " << progName << " code.c                    # Analysis only\n";
+    std::cout << "  " << progName << " --verbose code.c          # Detailed analysis\n";
+    std::cout << "  " << progName << " --generate-pragmas code.c # Creates code_openmp.c\n";
 }
 
-// Test 3: Complex but safe - should get medium confidence
-void test_complex_safe() {
-    float matrix[100][100];
-    float output[100][100];
-    int temp;
-    
-    for (int i = 0; i < 100; i++) {
-        temp = i * 2;  // Private variable
-        for (int j = 0; j < 100; j++) {
-            output[i][j] = matrix[i][j] + temp;
+void printVersion() {
+    std::cout << "Statik v1.0.0\n";
+    std::cout << "Static analysis tool for loop parallelization\n";
+}
+
+bool parseArgs(int argc, char** argv, std::string& input_file) {
+    for (int i = 1; i < argc; i++) {
+        std::string arg = argv[i];
+        
+        if (arg == "-h" || arg == "--help") {
+            printUsage(argv[0]);
+            return false;
+        } else if (arg == "-v" || arg == "--version") {
+            printVersion();
+            return false;
+        } else if (arg == "--generate-pragmas") {
+            generate_pragmas = true;
+        } else if (arg == "--verbose") {
+            verbose_mode = true;
+        } else if (!arg.empty() && arg[0] != '-') {
+            // This is the input file
+            input_file = arg;
         }
     }
+    
+    if (input_file.empty()) {
+        std::cerr << "Error: No input file specified\n";
+        return false;
+    }
+    
+    return true;
 }
 
-// Test 4: Unsafe - should not generate pragma
-void test_unsafe_loop() {
-    int arr[50];
+int main(int argc, char** argv) {
+    std::string input_file;
     
-    for (int k = 1; k < 50; k++) {
-        arr[k] = arr[k-1] + k;  // Loop-carried dependency
+    if (argc < 2 || !parseArgs(argc, argv, input_file)) {
+        if (argc >= 2) return 0; // Help/version was shown
+        printUsage(argv[0]);
+        return 1;
     }
-}
 
-// Test 5: Function calls - should get lower confidence or no pragma
-void test_with_function_calls() {
-    int values[80];
-    
-    for (int m = 0; m < 80; m++) {
-        values[m] = m;
-        printf("Value: %d\n", values[m]);  // Side effect
-    }
-}
-
-// Test 6: Hot loop with many operations - should get high confidence
-void test_hot_computation() {
-    double input[2000];
-    double output[2000];
-    
-    for (int n = 0; n < 2000; n++) {
-        double temp = input[n];
-        temp = temp * temp;
-        temp = temp + (temp * 0.5);
-        temp = sqrt(temp);
-        output[n] = temp;  // Many arithmetic operations
-    }
-}
-
-int main() {
-    test_simple_parallel();
-    test_simd_candidate();
-    test_complex_safe();
-    test_unsafe_loop();
-    test_with_function_calls();
-    test_hot_computation();
-    
-    return 0;
-}// Quick validation tests for dependency analysis
-
-// Should be SAFE
-void safe_example() {
-    int a[10], b[10];
-    for (int i = 0; i < 10; i++) {
-        b[i] = a[i] * 2;
-    }
-}
-
-// Should be UNSAFE - loop carried dependency
-void unsafe_example() {
-    int arr[10];
-    for (int i = 1; i < 10; i++) {
-        arr[i] = arr[i-1] + 1;
-    }
-}
-
-// Should be UNSAFE - function call
-void function_call_example() {
-    int data[5];
-    for (int i = 0; i < 5; i++) {
-        data[i] = rand();
-    }
-}#!/bin/bash
-echo "=== Comprehensive Dependency Analysis Test Suite ==="
-echo
-cd ../build
-echo "Running analysis on dependency_analysis.c..."
-echo
-./statik ../tests/dependency_analysis.c
-echo ""
-echo "=========================================="
-echo "Expected Results Summary:"
-echo "=========================================="
-echo "SAFE TO PARALLELIZE:"
-echo "- test_simple_safe: independent array operations"
-echo "- test_write_only: only writing to results array"
-echo "- test_math_functions: pure mathematical functions"
-echo ""
-echo "HAS DEPENDENCIES (UNSAFE):"
-echo "- test_loop_carried_dependency: arr[i] depends on arr[i-1]"
-echo "- test_scalar_dependency: sum variable read+write"
-echo "- test_pointer_operations: pointer arithmetic and dereference"
-echo "- test_function_calls: rand() and printf() side effects"
-echo "- test_complex_indexing: complex matrix indexing"
-echo "- test_cross_iteration: buffer[i-2] and buffer[i+1] conflicts"
-echo "- test_nested_loops: inner loop has dependency"
-echo "- test_pointer_aliasing: potential ptr1/ptr2 aliasing"
-echo "- test_reduction_local: total variable dependency"
-echo ""
-echo "Notes:"
-echo "- Nested loops: outer loop analysis depends on inner loop safety"
-echo "- Function calls: math functions may be marked potentially safe"
-echo "- Complex indexing: conservative analysis assumes unsafe"
-echo "- Cross-iteration: detects offset-based conflicts"#!/bin/bash
-echo "=== Testing OpenMP Pragma Generation ==="
-echo
-cd ../build
-echo "Running pragma generation analysis on pragma_generation.c..."
-echo
-./statik ../tests/pragma_generation.c
-echo ""
-echo "=========================================="
-echo "Expected Results:"
-echo "=========================================="
-echo "SHOULD GENERATE PRAGMAS:"
-echo "- test_simple_parallel: #pragma omp parallel for (HIGH confidence)"
-echo "- test_simd_candidate: #pragma omp parallel for simd (HIGH confidence)"
-echo "- test_complex_safe: #pragma omp parallel for (MEDIUM confidence)"
-echo "- test_hot_computation: #pragma omp parallel for simd (VERY HIGH confidence)"
-echo ""
-echo "SHOULD NOT GENERATE PRAGMAS:"
-echo "- test_unsafe_loop: loop-carried dependency detected"
-echo "- test_with_function_calls: side effects from printf()"
-echo ""
-echo "CONFIDENCE EXPECTATIONS:"
-echo "- Simple array operations: High confidence"
-echo "- Math-heavy loops: Very high confidence" 
-echo "- Complex but safe patterns: Medium confidence"
-echo "- Loops with side effects: No pragma or low confidence"#!/bin/bash
-
-echo "=== Testing Variable Usage Pattern Detection ==="
-echo
-
-cd ../build
-
-echo "Running analysis on variable_patterns.c..."
-./statik ../tests/variable_patterns.c
-
-echo ""
-echo "Expected results:"
-echo "- test_independent_iterations: SAFE TO PARALLELIZE"
-echo "- test_loop_carried_dependency: HAS DEPENDENCIES" 
-echo "- test_reduction_pattern: HAS DEPENDENCIES (sum variable)"
-echo "- test_write_only: SAFE TO PARALLELIZE"
-echo "- test_complex_safe: SAFE TO PARALLELIZE (temp is local)"
-echo "- test_nested_loops: outer loop SAFE TO PARALLELIZE"
-echo "- test_function_calls: HAS DEPENDENCIES (function calls)"// Very basic test cases for debugging
-
-void basic_safe_loop() {
-    int a[10];
-    int b[10];
-    
-    for (int i = 0; i < 10; i++) {
-        b[i] = a[i] + 1;  // Should be safe
-    }
-}
-
-void basic_unsafe_loop() {
-    int arr[10];
-    
-    for (int i = 1; i < 10; i++) {
-        arr[i] = arr[i-1];  // Clear dependency
-    }
-}
-
-void induction_var_test() {
-    int data[100];
-    
-    for (int counter = 0; counter < 100; counter++) {
-        data[counter] = counter * 3;  // counter should be marked as induction var
-    }
-}#include <stdio.h>
-
-int main() {
-    int i, j;
-    int arr[100];
-    int sum = 0;
-    
-    // Simple for loop
-    for (i = 0; i < 100; i++) {
-        arr[i] = i * 2;
+    if (generate_pragmas) {
+        output_filename = generateOutputFilename(input_file);
+        std::cout << "Mode: Pragma generation\n";
+        std::cout << "Input: " << input_file << "\n";
+        std::cout << "Output: " << output_filename << "\n";
+    } else {
+        std::cout << "Mode: Analysis only\n";
     }
     
-    // Nested for loops
-    for (i = 0; i < 10; i++) {
-        for (j = 0; j < 10; j++) {
-            sum += i + j;
-        }
+    std::cout << "Analyzing: " << input_file << "\n";
+
+    // Read source file
+    std::ifstream file(input_file);
+    if (!file.is_open()) {
+        std::cerr << "Error: Could not open file " << input_file << std::endl;
+        return 1;
     }
     
-    // While loop
-    i = 0;
-    while (i < 50) {
-        sum += arr[i];
-        i++;
+    std::string source_code((std::istreambuf_iterator<char>(file)),
+                           std::istreambuf_iterator<char>());
+    file.close();
+    
+    auto tool = newFrontendActionFactory<AnalyzerAction>();
+    
+    // Create action with pragma generation settings
+    std::unique_ptr<FrontendAction> action;
+    if (generate_pragmas) {
+        action = std::make_unique<AnalyzerAction>(true, output_filename, input_file, verbose_mode);
+    } else {
+        action = std::make_unique<AnalyzerAction>(false, "", "", verbose_mode);
     }
     
-    // Do-while loop
-    j = 10;
-    do {
-        sum += j;
-        j--;
-    } while (j > 0);
+    // Run analysis (and pragma generation if enabled)
+    bool result = runToolOnCode(std::move(action), source_code, input_file);
     
-    return sum;
-}
-
-void helper_function() {
-    int k;
-    
-    // Loop in another function
-    for (k = 0; k < 5; k++) {
-        printf("Helper: %d\n", k);
+    if (!result) {
+        std::cerr << "Analysis failed\n";
+        return 1;
     }
-}#!/bin/bash
-
-echo "Testing loop detection..."
-
-cd ../build
-
-echo "=== Testing simple_loops.c ==="
-./statik ../tests/simple_loops.c
-
-echo ""
-echo "Expected: 5 loops total (2 for, 1 while, 1 do-while, 1 for in helper)"#include <stdio.h>
-
-// Test case 1: Simple parallelizable loop (independent iterations)
-void test_independent_iterations() {
-    int arr[100];
-    int result[100];
     
-    // This should be marked as safe to parallelize
-    for (int i = 0; i < 100; i++) {
-        result[i] = arr[i] * 2 + 5;  // No dependencies between iterations
-    }
-}
-
-// Test case 2: Loop-carried dependency (not parallelizable)
-void test_loop_carried_dependency() {
-    int arr[100];
-    
-    // This has a loop-carried dependency - NOT safe to parallelize
-    for (int i = 1; i < 100; i++) {
-        arr[i] = arr[i-1] + arr[i];  // arr[i] depends on arr[i-1] from previous iteration
-    }
-}
-
-// Test case 3: Reduction pattern (could be parallelized with special handling)
-void test_reduction_pattern() {
-    int arr[100];
-    int sum = 0;
-    
-    // Sum reduction - has dependency on 'sum' but could be parallelized
-    for (int i = 0; i < 100; i++) {
-        sum += arr[i];  // 'sum' is read and written each iteration
-    }
-}
-
-// Test case 4: Write-only arrays (safe to parallelize)
-void test_write_only() {
-    int output[100];
-    
-    for (int i = 0; i < 100; i++) {
-        output[i] = i * i;  // Only writing to output[i], no reads
-    }
-}
-
-// Test case 5: Complex but safe pattern
-void test_complex_safe() {
-    int a[100], b[100], c[100];
-    int temp;
-    
-    for (int j = 0; j < 100; j++) {
-        temp = a[j] + b[j];      // temp is loop-local
-        c[j] = temp * 2;         // Only accessing c[j], not other elements
-    }
-}
-
-// Test case 6: Nested loops with different characteristics
-void test_nested_loops() {
-    int matrix[10][10];
-    int result[10][10];
-    
-    // Outer loop should be parallelizable
-    for (int i = 0; i < 10; i++) {
-        // Inner loop accesses different rows
-        for (int j = 0; j < 10; j++) {
-            result[i][j] = matrix[i][j] + matrix[i][j] * 2;
-        }
-    }
-}
-
-// Test case 7: Function calls (should be marked unsafe)
-void helper_function(int x) {
-    printf("Value: %d\n", x);
-}
-
-void test_function_calls() {
-    int arr[50];
-    
-    for (int k = 0; k < 50; k++) {
-        arr[k] = k;
-        helper_function(arr[k]);  // Function call makes this unsafe
-    }
-}
-
-int main() {
-    test_independent_iterations();
-    test_loop_carried_dependency();
-    test_reduction_pattern();
-    test_write_only();
-    test_complex_safe();
-    test_nested_loops();
-    test_function_calls();
-    
+    std::cout << "Analysis complete\n";
     return 0;
 }

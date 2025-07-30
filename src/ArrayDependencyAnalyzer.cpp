@@ -28,6 +28,7 @@ void ArrayDependencyAnalyzer::analyzeArrayDependencies(LoopInfo& loop) {
   }
   
   // Run cross-iteration analysis for more sophisticated conflict detection
+  cross_iteration_analyzer_->setVerbose(verbose_); 
   cross_iteration_analyzer_->analyzeCrossIterationConflicts(loop);
   
   if (verbose_) {

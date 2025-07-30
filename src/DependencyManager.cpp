@@ -27,7 +27,7 @@ void DependencyManager::analyzeLoop(LoopInfo& loop) {
   warnings_.clear();
   
   if (verbose_) {
-    std::cout << "\n=== Dependency Analysis for Loop at Line " << loop.line_number << " ===\n";
+    std::cout << "\n\n=== Dependency Analysis for Loop at Line " << loop.line_number << " ===\n";
   }
   
   try {
@@ -53,7 +53,7 @@ void DependencyManager::analyzeLoop(LoopInfo& loop) {
           }
         }
       }
-      std::cout << "========================\n\n";
+      std::cout << "======================================================\n\n";
     }
     
   } catch (const std::exception& e) {
@@ -132,6 +132,7 @@ void DependencyManager::runPointerAnalysis(LoopInfo& loop) {
   }
   
   try {
+    pointer_analyzer_->setVerbose(verbose_);
     pointer_analyzer_->analyzePointerUsage(loop);
     
     PointerRisk risk = pointer_analyzer_->getPointerRisk(loop);
@@ -157,6 +158,7 @@ void DependencyManager::runFunctionAnalysis(LoopInfo& loop) {
   }
   
   try {
+    function_analyzer_->setVerbose(verbose_);
     function_analyzer_->analyzeFunctionCalls(loop);
     
     FunctionCallSafety safety = function_analyzer_->getFunctionCallSafety(loop);
