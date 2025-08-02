@@ -17,9 +17,6 @@ void FunctionCallAnalyzer::analyzeFunctionCalls(LoopInfo& loop) {
              << loop.line_number << "\n";
   }
   
-  // Function call detection happens through visitCallExpr
-  // This method summarizes the safety assessment
-  
   FunctionCallSafety safety = getFunctionCallSafety(loop);
   
   if (verbose_) {
@@ -38,17 +35,14 @@ void FunctionCallAnalyzer::analyzeFunctionCalls(LoopInfo& loop) {
 }
 
 FunctionCallSafety FunctionCallAnalyzer::getFunctionCallSafety(const LoopInfo& loop) const {
-  // Check the stored function call info in LoopInfo
   if (loop.detected_function_calls.empty()) {
     return FunctionCallSafety::SAFE;
   }
   
-  // Check the stored safety flags
   if (loop.hasUnsafeFunctionCalls()) {
     return FunctionCallSafety::UNSAFE;
   }
   
-  // If we have function calls but they're all safe, check if they're math functions
   bool has_potentially_safe_calls = !loop.detected_function_calls.empty();
   
   if (has_potentially_safe_calls) {
@@ -94,7 +88,7 @@ void FunctionCallAnalyzer::visitCallExpr(CallExpr* callExpr, LoopInfo& loop) {
 }
 
 void FunctionCallAnalyzer::initializeSafeFunctions() {
-  // Common math functions that are generally safe for parallelization
+  // Math functions that don't have side effects
   safe_math_functions_ = {
     "sin", "cos", "tan", "asin", "acos", "atan", "atan2",
     "sinh", "cosh", "tanh", "asinh", "acosh", "atanh",
@@ -130,7 +124,7 @@ std::string FunctionCallAnalyzer::getFunctionName(CallExpr* callExpr) const {
       }
     }
     
-    // Try to get name from function pointer or member call
+    // Handle function pointers and member calls
     if (Expr* callee = callExpr->getCallee()) {
       callee = callee->IgnoreParenImpCasts();
       
@@ -147,7 +141,6 @@ std::string FunctionCallAnalyzer::getFunctionName(CallExpr* callExpr) const {
       }
     }
   } catch (...) {
-    // Return safe default if anything goes wrong
     return "unknown_function";
   }
   
@@ -155,14 +148,13 @@ std::string FunctionCallAnalyzer::getFunctionName(CallExpr* callExpr) const {
 }
 
 bool FunctionCallAnalyzer::hasPotentialSideEffects(const std::string& function_name) const {
-  // Conservative approach: assume unknown functions have side effects
+  // Be conservative - assume unknown functions have side effects
   
-  // Known safe functions
   if (isSafeMathFunction(function_name)) {
     return false;
   }
   
-  // Functions that are generally safe (read-only operations)
+  // Read-only string/char functions
   static const std::set<std::string> safe_functions = {
     "strlen", "strcmp", "strncmp", "strchr", "strstr",
     "memcmp", "isalpha", "isdigit", "isspace", "toupper", "tolower"
@@ -185,7 +177,7 @@ bool FunctionCallAnalyzer::hasPotentialSideEffects(const std::string& function_n
     return true;
   }
   
-  // Conservative default: assume unknown functions have side effects
+  // Default to unsafe for unknown functions
   return true;
 }
 

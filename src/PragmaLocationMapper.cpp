@@ -11,7 +11,6 @@ void PragmaLocationMapper::mapLoopToPragmaLocation(const LoopInfo& loop) {
   std::cout << "  Mapping pragma insertion point for " << loop.loop_type 
            << " loop at line " << loop.line_number << "\n";
   
-  // Find the best location to insert the pragma (usually before the loop)
   SourceLocation pragma_loc = findPragmaInsertionLocation(loop.stmt);
   
   if (pragma_loc.isInvalid()) {
@@ -19,13 +18,12 @@ void PragmaLocationMapper::mapLoopToPragmaLocation(const LoopInfo& loop) {
     return;
   }
   
-  // Skip loops in macro expansions - too risky to modify
+  // Skip macro expansions
   if (isLocationInMacro(pragma_loc)) {
     std::cout << "  Skipping loop in macro expansion\n";
     return;
   }
   
-  // Get both spelling and expansion line numbers for comparison
   unsigned spelling_line = source_manager_->getSpellingLineNumber(pragma_loc);
   unsigned expansion_line = source_manager_->getExpansionLineNumber(pragma_loc);
   
@@ -34,7 +32,6 @@ void PragmaLocationMapper::mapLoopToPragmaLocation(const LoopInfo& loop) {
              << spelling_line << ", expansion: " << expansion_line << ")\n";
   }
   
-  // Use spelling line number for accurate source location
   unsigned line = spelling_line;
   unsigned col = getColumnNumber(pragma_loc);
   
@@ -60,9 +57,8 @@ SourceLocation PragmaLocationMapper::findPragmaInsertionLocation(Stmt* loop_stmt
     return SourceLocation();
   }
   
-  // Handle macro expansions and preprocessor issues
+  // Handle macro expansions
   if (loop_start.isMacroID()) {
-    // Get the spelling location (where the text actually appears)
     loop_start = source_manager_->getSpellingLoc(loop_start);
     
     if (loop_start.isInvalid()) {
@@ -71,20 +67,16 @@ SourceLocation PragmaLocationMapper::findPragmaInsertionLocation(Stmt* loop_stmt
     }
   }
   
-  // Try to move to the beginning of the line containing the loop
   SourceLocation line_start = moveToStartOfLine(loop_start);
   
-  // Check if there are preprocessor directives on the line before
-  // If so, we need to insert after them
+  // TODO: Check for preprocessor directives on previous line
   unsigned line_num = source_manager_->getSpellingLineNumber(line_start);
   if (line_num > 1) {
-    // Check the previous line for preprocessor directives
     SourceLocation prev_line = source_manager_->translateLineCol(
         source_manager_->getFileID(line_start), line_num - 1, 1);
     
     if (prev_line.isValid()) {
-      // For now, use the current line start
-      // A more sophisticated approach would parse preprocessor directives
+      // For now just use current line - could improve this
       return line_start;
     }
   }
@@ -105,7 +97,6 @@ bool PragmaLocationMapper::isLocationInMacro(SourceLocation loc) {
     return false;
   }
   
-  // Check if this location is from a macro expansion
   return loc.isMacroID();
 }
 
@@ -114,14 +105,11 @@ std::string PragmaLocationMapper::getIndentationAtLocation(SourceLocation loc) {
     return "";
   }
   
-  // Get the line start and read characters until we hit non-whitespace
   SourceLocation line_start = moveToStartOfLine(loc);
   
-  // This is a simplified approach - a real implementation would
-  // read the source file and analyze the actual indentation
-  
-  // For now, return a reasonable default indentation
-  return "    "; // 4 spaces
+  // TODO: Actually read the source file to get real indentation
+  // For now just return reasonable default
+  return "    ";
 }
 
 SourceLocation PragmaLocationMapper::moveToStartOfLine(SourceLocation loc) {
@@ -129,12 +117,10 @@ SourceLocation PragmaLocationMapper::moveToStartOfLine(SourceLocation loc) {
     return loc;
   }
   
-  // For now, we'll use the given location as a reasonable approximation
-  // In practice, Clang's Lexer class has better methods for this
+  // Could use Clang's Lexer class for better line handling
   unsigned line = source_manager_->getSpellingLineNumber(loc);
   FileID file_id = source_manager_->getFileID(loc);
   
-  // Try to get location at column 1 of the same line
   SourceLocation line_start = source_manager_->translateLineCol(file_id, line, 1);
   
   return line_start.isValid() ? line_start : loc;

@@ -9,14 +9,14 @@ namespace statik {
 ConfidenceScore ConfidenceScorer::calculateConfidence(const LoopInfo& loop, const GeneratedPragma& pragma) {
   ConfidenceScore score;
   
-  // Calculate individual scores
+  // Score different aspects of the loop
   double loop_score = scoreLoopCharacteristics(loop);
   double pragma_score = scorePragmaType(pragma.type);
   double complexity_score = scoreComplexity(loop);
   double data_score = scoreDataAccess(loop);
   double dependency_score = scoreDependencyAnalysis(loop);
   
-  // Weighted combination
+  // Weighted combination (could tune these weights later)
   double weights[] = {0.25, 0.15, 0.20, 0.20, 0.20};
   double scores[] = {loop_score, pragma_score, complexity_score, data_score, dependency_score};
   
@@ -25,15 +25,13 @@ ConfidenceScore ConfidenceScorer::calculateConfidence(const LoopInfo& loop, cons
     score.numerical_score += weights[i] * scores[i];
   }
   
-  // Clamp to valid range
   score.numerical_score = std::max(0.0, std::min(1.0, score.numerical_score));
   score.level = convertToLevel(score.numerical_score);
   
-  // Collect positive and negative factors
+  // Build list of factors that influenced the score
   std::vector<std::string> positive_factors;
   std::vector<std::string> negative_factors;
   
-  // Analyze factors
   if (loop.bounds.is_simple_pattern) {
     positive_factors.push_back("Simple iterator pattern detected");
   }
@@ -68,9 +66,8 @@ ConfidenceScore ConfidenceScorer::calculateConfidence(const LoopInfo& loop, cons
 }
 
 double ConfidenceScorer::scoreLoopCharacteristics(const LoopInfo& loop) {
-  double score = 0.5; // Base score
+  double score = 0.5;
   
-  // Simple patterns boost confidence
   if (loop.bounds.is_simple_pattern) {
     score += 0.3;
   }
@@ -79,10 +76,9 @@ double ConfidenceScorer::scoreLoopCharacteristics(const LoopInfo& loop) {
   if (loop.depth == 0) {
     score += 0.2;
   } else {
-    score -= 0.1 * loop.depth; // Penalty for nesting
+    score -= 0.1 * loop.depth;
   }
   
-  // Hot loops are good candidates
   if (loop.isHot()) {
     score += 0.1;
   }
@@ -93,11 +89,11 @@ double ConfidenceScorer::scoreLoopCharacteristics(const LoopInfo& loop) {
 double ConfidenceScorer::scorePragmaType(PragmaType type) {
   switch (type) {
     case PragmaType::PARALLEL_FOR:
-      return 0.8; // High confidence for basic parallel for
+      return 0.8;
     case PragmaType::PARALLEL_FOR_SIMD:
-      return 0.7; // Slightly lower for combined approach
+      return 0.7;
     case PragmaType::SIMD:
-      return 0.6; // SIMD only is more specialized
+      return 0.6;
     case PragmaType::NO_PRAGMA:
     default:
       return 0.0;
@@ -105,42 +101,40 @@ double ConfidenceScorer::scorePragmaType(PragmaType type) {
 }
 
 double ConfidenceScorer::scoreComplexity(const LoopInfo& loop) {
-  double score = 1.0; // Start high
+  double score = 1.0;
   
-  // Penalize based on complexity indicators
+  // Function calls add complexity
   if (loop.metrics.function_calls > 2) {
     score -= 0.3;
   } else if (loop.metrics.function_calls > 0) {
     score -= 0.1;
   }
   
-  // Too many variables suggests complexity
+  // Too many variables might indicate complexity
   if (loop.variables.size() > 8) {
     score -= 0.3;
   } else if (loop.variables.size() > 5) {
     score -= 0.1;
   }
   
-  // Complex arithmetic patterns
+  // Heavy arithmetic might be complex
   if (loop.metrics.arithmetic_ops > 10) {
-    score -= 0.1; // Might indicate complex calculations
+    score -= 0.1;
   }
   
   return std::max(0.0, std::min(1.0, score));
 }
 
 double ConfidenceScorer::scoreDataAccess(const LoopInfo& loop) {
-  double score = 0.5; // Neutral starting point
+  double score = 0.5;
   
-  // Array accesses are good for parallelization
   if (!loop.array_accesses.empty()) {
     score += 0.3;
     
-    // Simple access patterns boost confidence
+    // TODO: Actually analyze access patterns for complexity
     bool has_simple_access = true;
     for (const auto& access : loop.array_accesses) {
-      // For now, assume accesses are simple if we got this far
-      // More sophisticated analysis would check index expressions
+      // Placeholder - should check index expressions
     }
     
     if (has_simple_access) {
@@ -148,7 +142,6 @@ double ConfidenceScorer::scoreDataAccess(const LoopInfo& loop) {
     }
   }
   
-  // Memory-intensive loops benefit from parallelization
   if (loop.metrics.memory_accesses > 5) {
     score += 0.1;
   }
@@ -157,20 +150,19 @@ double ConfidenceScorer::scoreDataAccess(const LoopInfo& loop) {
 }
 
 double ConfidenceScorer::scoreDependencyAnalysis(const LoopInfo& loop) {
-  // If we're generating a pragma, dependencies should be clean
   if (loop.has_dependencies) {
-    return 0.0; // No confidence if dependencies detected
+    return 0.0; // Can't be confident if there are dependencies
   }
   
-  double score = 0.8; // High base score for clean loops
+  double score = 0.8;
   
-  // Boost confidence if analysis was thorough
+  // More thorough analysis = higher confidence
   if (!loop.variables.empty()) {
-    score += 0.1; // We analyzed variables
+    score += 0.1;
   }
   
   if (!loop.array_accesses.empty()) {
-    score += 0.1; // We analyzed array patterns
+    score += 0.1;
   }
   
   return std::max(0.0, std::min(1.0, score));

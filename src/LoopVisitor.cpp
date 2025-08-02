@@ -17,28 +17,21 @@ bool LoopVisitor::VisitForStmt(ForStmt* forLoop) {
     SourceLocation loc = forLoop->getForLoc();
     addLoop(forLoop, loc, "for");
 
-    // Get the newly added loop and set up parent relationship
     LoopInfo* newLoop = &loops_.back();
     if (!loop_stack_.empty()) {
         newLoop->setParent(loop_stack_.top());
     }
 
-    // Analyze loop bounds and identify induction variable
     analyzeForLoopBounds(forLoop, *newLoop);
 
-    // Push this loop onto stack and traverse body
+    // Process the loop body
     loop_stack_.push(newLoop);
     if (forLoop->getBody()) {
         TraverseStmt(forLoop->getBody());
     }
 
-    // After traversing, mark the induction variable
     markInductionVariable(*newLoop);
-
-    // Run dependency analysis
     finalizeDependencyAnalysis(*newLoop);
-
-    // Finalize metrics before popping
     newLoop->finalizeMetrics();
     loop_stack_.pop();
     return true;
@@ -118,7 +111,6 @@ bool LoopVisitor::VisitDeclRefExpr(DeclRefExpr* declRef) {
         SourceManager& sm = context_->getSourceManager();
         unsigned line = sm.getSpellingLineNumber(loc);
 
-        // Determine if this is a read or write by looking at parent context
         bool isWrite = isWriteAccess(declRef);
         bool isRead = !isWrite;
         VariableUsage usage(loc, line, isRead, isWrite);
@@ -126,7 +118,6 @@ bool LoopVisitor::VisitDeclRefExpr(DeclRefExpr* declRef) {
         LoopInfo* currentLoop = getCurrentLoop();
         auto it = currentLoop->variables.find(varName);
         if (it == currentLoop->variables.end()) {
-            // Variable not yet tracked, add it
             VariableScope scope = determineVariableScope(varDecl);
             VariableInfo varInfo(varName, varDecl, scope, varDecl->getLocation());
             currentLoop->addVariable(varInfo);
@@ -186,11 +177,10 @@ bool LoopVisitor::VisitCallExpr(CallExpr* callExpr) {
                   << "\n";
     }
 
-    // Analyze the function call and store the result in LoopInfo
+    // Analyze function call for safety
     FunctionCallAnalyzer temp_analyzer(context_);
     temp_analyzer.visitCallExpr(callExpr, *currentLoop);
 
-    // Extract the function name and safety info
     std::string func_name;
     if (auto* funcDecl = callExpr->getDirectCallee()) {
         if (funcDecl->getDeclName().isIdentifier()) {
@@ -201,7 +191,7 @@ bool LoopVisitor::VisitCallExpr(CallExpr* callExpr) {
         func_name = "unknown_function";
     }
 
-    // Check if it's safe using the same logic as FunctionCallAnalyzer
+    // Check safety using predefined unsafe function list
     bool is_safe = true;
     static const std::set<std::string> unsafe_functions = {
         "printf", "fprintf", "sprintf", "puts", "putchar",
@@ -215,7 +205,6 @@ bool LoopVisitor::VisitCallExpr(CallExpr* callExpr) {
         is_safe = false;
     }
 
-    // Store in LoopInfo
     currentLoop->addDetectedFunctionCall(func_name, is_safe);
 
     return true;
@@ -226,7 +215,7 @@ void LoopVisitor::analyzeForLoopBounds(ForStmt* forLoop, LoopInfo& info) {
     info.bounds.condition_expr = forLoop->getCond();
     info.bounds.increment_expr = forLoop->getInc();
 
-    // Try to extract iterator variable name from initialization
+    // Extract iterator variable name
     if (auto* declStmt = dyn_cast_or_null<DeclStmt>(forLoop->getInit())) {
         if (declStmt->isSingleDecl()) {
             if (auto* varDecl = dyn_cast<VarDecl>(declStmt->getSingleDecl())) {
@@ -235,7 +224,7 @@ void LoopVisitor::analyzeForLoopBounds(ForStmt* forLoop, LoopInfo& info) {
         }
     }
 
-    // Check for simple pattern
+    // Check for simple loop pattern
     if (!info.bounds.iterator_var.empty() && info.bounds.condition_expr &&
         info.bounds.increment_expr) {
         info.bounds.is_simple_pattern = true;
@@ -248,7 +237,6 @@ void LoopVisitor::analyzeForLoopBounds(ForStmt* forLoop, LoopInfo& info) {
 }
 
 void LoopVisitor::markInductionVariable(LoopInfo& loop) {
-    // Mark the loop iterator as an induction variable
     if (!loop.bounds.iterator_var.empty()) {
         auto it = loop.variables.find(loop.bounds.iterator_var);
         if (it != loop.variables.end()) {
@@ -262,15 +250,12 @@ void LoopVisitor::markInductionVariable(LoopInfo& loop) {
 }
 
 void LoopVisitor::finalizeDependencyAnalysis(LoopInfo& loop) {
-    // Print array access summary before dependency analysis
     if (verbose_) {
         printArrayAccessSummary();
     }
 
-    // Clear for next loop
     line_access_summaries_.clear();
 
-    // Pass verbose flag to dependency analyzer
     if (dependency_analyzer_) {
         dependency_analyzer_->setVerbose(verbose_);
     }
@@ -289,12 +274,11 @@ bool LoopVisitor::VisitArraySubscriptExpr(ArraySubscriptExpr* arrayExpr) {
     SourceManager& sm = context_->getSourceManager();
     unsigned line = sm.getSpellingLineNumber(loc);
 
-    // Determine if this is a write access by checking parent context
+    // Check if this is a write by looking at parent context
     bool is_write = false;
     auto parents = context_->getParents(*arrayExpr);
     for (const auto& parent : parents) {
         if (auto* binaryOp = parent.get<BinaryOperator>()) {
-            // Check if this array access is the LHS of an assignment
             if (binaryOp->isAssignmentOp() && binaryOp->getLHS() == arrayExpr) {
                 is_write = true;
                 break;
@@ -302,11 +286,10 @@ bool LoopVisitor::VisitArraySubscriptExpr(ArraySubscriptExpr* arrayExpr) {
         }
     }
 
-    // Create ArrayAccess with proper write/read flag and subscript
     ArrayAccess access(arrayName, arrayExpr->getIdx(), loc, line, is_write);
     getCurrentLoop()->addArrayAccess(access);
 
-    // Collect for summary instead of printing immediately
+    // Collect for clean summary output
     if (verbose_) {
         std::string subscript_str = extractSubscriptString(arrayExpr->getIdx());
         std::string access_pattern = arrayName + "[" + subscript_str + "]";
@@ -321,7 +304,7 @@ bool LoopVisitor::VisitArraySubscriptExpr(ArraySubscriptExpr* arrayExpr) {
 std::string LoopVisitor::extractArrayBaseName(ArraySubscriptExpr* arrayExpr) {
     Expr* base = arrayExpr->getBase()->IgnoreParenImpCasts();
 
-    // For multi-dimensional arrays, traverse down to base
+    // Handle multi-dimensional arrays
     while (auto* innerArray = dyn_cast<ArraySubscriptExpr>(base)) {
         base = innerArray->getBase()->IgnoreParenImpCasts();
     }
@@ -377,27 +360,23 @@ void LoopVisitor::printArrayAccessSummary() {
 }
 
 bool LoopVisitor::isWriteAccess(DeclRefExpr* declRef) {
-    // Look at parent nodes to determine if this is a write access
     auto parents = context_->getParents(*declRef);
     for (const auto& parent : parents) {
         if (auto* binaryOp = parent.get<BinaryOperator>()) {
-            // Check if this declRef is the LHS of an assignment
             if (binaryOp->isAssignmentOp() && binaryOp->getLHS() == declRef) {
                 return true;
             }
         } else if (auto* unaryOp = parent.get<UnaryOperator>()) {
-            // Check for increment/decrement operators
             if (unaryOp->isIncrementDecrementOp()) {
                 return true;
             }
         } else if (auto* compoundAssign = parent.get<CompoundAssignOperator>()) {
-            // +=, -=, *=, etc.
             if (compoundAssign->getLHS() == declRef) {
                 return true;
             }
         }
     }
-    return false; // Default to read access
+    return false;
 }
 
 bool LoopVisitor::isArithmeticOp(BinaryOperator* binOp) {
@@ -409,12 +388,11 @@ bool LoopVisitor::isComparisonOp(BinaryOperator* binOp) {
 }
 
 VariableScope LoopVisitor::determineVariableScope(VarDecl* varDecl) const {
-    // Simple heuristic for now - we can improve this later
+    // TODO: Improve scope detection logic
     if (!varDecl) {
         return VariableScope::GLOBAL;
     }
 
-    // Check if declared within current loop body (rough approximation)
     SourceManager& sm = context_->getSourceManager();
     SourceLocation declLoc = varDecl->getLocation();
 
@@ -422,8 +400,7 @@ VariableScope LoopVisitor::determineVariableScope(VarDecl* varDecl) const {
         return VariableScope::FUNCTION_LOCAL;
     }
 
-    // For now, assume variables found while traversing loop are loop-local
-    // This is a simplification - real implementation would check scopes more carefully
+    // Simple heuristic for now
     return VariableScope::LOOP_LOCAL;
 }
 
@@ -451,7 +428,6 @@ void LoopVisitor::printLoopSummary() const {
         return;
     }
 
-    // Print table header
     std::cout << "Loop   Location    Type     Status          Reason\n";
     std::cout << "----   --------    ----     ------          ------\n";
 
@@ -459,23 +435,20 @@ void LoopVisitor::printLoopSummary() const {
     for (size_t i = 0; i < loops_.size(); i++) {
         const auto& loop = loops_[i];
 
-        // Format: L1     line 6      for      PARALLELIZABLE  Simple array operations
         std::cout << "L" << (i + 1);
-        // Pad to align columns
         std::cout << "     line " << loop.line_number;
-        if (loop.line_number < 10) std::cout << "    ";  // Extra space for single digits
+        if (loop.line_number < 10) std::cout << "    ";
         else if (loop.line_number < 100) std::cout << "   ";
         else std::cout << "  ";
 
         std::cout << "  " << loop.loop_type;
-        if (loop.loop_type.length() < 5) std::cout << "  ";  // Pad short types
+        if (loop.loop_type.length() < 5) std::cout << "  ";
 
-        // Determine status and reason
+        // Determine status and reasoning
         std::string status, reason;
         if (loop.isParallelizable()) {
             status = "PARALLELIZABLE";
             parallelizable_count++;
-            // Determine why it's safe
             if (loop.bounds.is_simple_pattern && !loop.array_accesses.empty()) {
                 reason = "Simple array operations";
             } else if (loop.bounds.is_simple_pattern) {
@@ -485,17 +458,13 @@ void LoopVisitor::printLoopSummary() const {
             }
         } else {
             status = "UNSAFE";
-            // Determine why it's unsafe
             bool has_array_deps = false;
             bool has_function_calls = false;
 
-            // Check if this loop has unsafe function calls
             if (loop.hasUnsafeFunctionCalls()) {
                 has_function_calls = true;
             }
 
-            // Check if this loop has array dependencies (we'd need to check the actual dependencies)
-            // For now, we'll infer from the other conditions
             if (!has_function_calls && loop.has_dependencies) {
                 has_array_deps = true;
             }
@@ -512,14 +481,12 @@ void LoopVisitor::printLoopSummary() const {
         }
 
         std::cout << "  " << status;
-        // Pad status column
         for (int pad = status.length(); pad < 15; pad++) {
             std::cout << " ";
         }
         std::cout << " " << reason << "\n";
     }
 
-    // Summary line
     std::cout << "\nParallelizable: " << parallelizable_count << "/" << loops_.size()
               << " loops (" << (loops_.size() > 0 ? (parallelizable_count * 100 / loops_.size()) : 0) << "%)\n";
 }

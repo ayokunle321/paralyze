@@ -11,11 +11,11 @@
 namespace statik {
 
 enum class IterationConflictType {
-  NO_CONFLICT,          // Different iterations access different elements
-  WRITE_AFTER_READ,     // Later iteration writes what earlier read
-  READ_AFTER_WRITE,     // Later iteration reads what earlier wrote
-  WRITE_AFTER_WRITE,    // Multiple iterations write same location
-  STRIDE_CONFLICT       // Non-unit stride creates potential conflicts
+  NO_CONFLICT,
+  WRITE_AFTER_READ,
+  READ_AFTER_WRITE,
+  WRITE_AFTER_WRITE,
+  STRIDE_CONFLICT       // Non-unit stride or complex indexing
 };
 
 struct CrossIterationConflict {
@@ -40,7 +40,6 @@ public:
   void analyzeCrossIterationConflicts(LoopInfo& loop);
   bool hasCrossIterationConflicts(const LoopInfo& loop) const;
   
-  // Verbose control
   void setVerbose(bool verbose) { verbose_ = verbose; }
   
 private:

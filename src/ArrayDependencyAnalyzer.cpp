@@ -14,20 +14,19 @@ void ArrayDependencyAnalyzer::analyzeArrayDependencies(LoopInfo& loop) {
              << loop.array_accesses.size() << " array accesses\n";
   }
   
-  // Compare every pair of array accesses for basic conflicts
+  // Check all pairs of array accesses for conflicts
   for (size_t i = 0; i < loop.array_accesses.size(); i++) {
     for (size_t j = i + 1; j < loop.array_accesses.size(); j++) {
       const ArrayAccess& access1 = loop.array_accesses[i];
       const ArrayAccess& access2 = loop.array_accesses[j];
       
-      // Only check accesses to the same array
       if (access1.array_name == access2.array_name) {
         checkArrayAccessPair(access1, access2, loop.bounds.iterator_var);
       }
     }
   }
   
-  // Run cross-iteration analysis for more sophisticated conflict detection
+  // Run cross-iteration analysis 
   cross_iteration_analyzer_->setVerbose(verbose_); 
   cross_iteration_analyzer_->analyzeCrossIterationConflicts(loop);
   
@@ -38,14 +37,12 @@ void ArrayDependencyAnalyzer::analyzeArrayDependencies(LoopInfo& loop) {
 }
 
 bool ArrayDependencyAnalyzer::hasArrayDependencies(const LoopInfo& loop) const {
-  // Check basic array dependencies
   for (const auto& dep : detected_dependencies_) {
     if (dep.type != ArrayDependencyType::NO_DEPENDENCY) {
       return true;
     }
   }
   
-  // Check cross-iteration conflicts
   if (cross_iteration_analyzer_->hasCrossIterationConflicts(loop)) {
     return true;
   }
@@ -56,7 +53,7 @@ bool ArrayDependencyAnalyzer::hasArrayDependencies(const LoopInfo& loop) const {
 void ArrayDependencyAnalyzer::checkArrayAccessPair(const ArrayAccess& access1, 
                                                    const ArrayAccess& access2,
                                                    const std::string& induction_var) {
-  // Skip if both are just reads - no dependency
+  // Skip read-only pairs
   if (!access1.is_write && !access2.is_write) {
     return;
   }
@@ -104,35 +101,31 @@ ArrayDependencyType ArrayDependencyAnalyzer::compareArrayIndices(Expr* index1,
     return ArrayDependencyType::UNKNOWN_RELATION;
   }
   
-  // Add safety checks to prevent crashes on malformed expressions
   try {
     std::string idx1_str = exprToString(index1);
     std::string idx2_str = exprToString(index2);
     
-    // If expression parsing failed, be conservative
     if (idx1_str == "error_expr" || idx2_str == "error_expr") {
       return ArrayDependencyType::UNKNOWN_RELATION;
     }
     
-    // Check if both are simple induction variable accesses (A[i] and A[i])
+    // Check for A[i] vs A[i] pattern
     if (isSimpleInductionAccess(index1, induction_var) && 
         isSimpleInductionAccess(index2, induction_var)) {
       return ArrayDependencyType::SAME_INDEX;
     }
     
-    // Check for constant offset patterns like A[i] vs A[i+1]
+    // Check for offset patterns like A[i] vs A[i+1]
     if (hasConstantOffset(index1, index2)) {
       return ArrayDependencyType::CONSTANT_OFFSET;
     }
     
-    // If indices look different but we can't prove they don't conflict
     if (idx1_str != idx2_str) {
       return ArrayDependencyType::UNKNOWN_RELATION;
     }
     
     return ArrayDependencyType::NO_DEPENDENCY;
   } catch (...) {
-    // Conservative fallback - assume unsafe if analysis fails
     return ArrayDependencyType::UNKNOWN_RELATION;
   }
 }
@@ -143,7 +136,6 @@ bool ArrayDependencyAnalyzer::isSimpleInductionAccess(Expr* index,
     return false;
   }
   
-  // Look for simple DeclRefExpr that matches induction variable
   index = index->IgnoreParenImpCasts();
   if (auto* declRef = dyn_cast<DeclRefExpr>(index)) {
     return declRef->getDecl()->getNameAsString() == induction_var;
@@ -157,15 +149,14 @@ bool ArrayDependencyAnalyzer::hasConstantOffset(Expr* index1, Expr* index2) {
     return false;
   }
   
-  // This is a simplified check - real implementation would need more sophisticated
-  // expression analysis to detect patterns like i vs i+1, i vs i-1, etc.
+  // TODO: Improve this - current implementation is pretty basic
   std::string str1 = exprToString(index1);
   std::string str2 = exprToString(index2);
   
-  // Look for obvious patterns like "i" vs "i + 1" or "i" vs "i - 1"
+  // Look for arithmetic patterns 
   if ((str1.find("+") != std::string::npos || str1.find("-") != std::string::npos) &&
       (str2.find("+") != std::string::npos || str2.find("-") != std::string::npos)) {
-    return true;  // Conservative: assume any arithmetic means potential offset
+    return true;
   }
   
   return false;
@@ -176,7 +167,6 @@ std::string ArrayDependencyAnalyzer::exprToString(Expr* expr) {
     return "null";
   }
   
-  // Add try-catch equivalent behavior for robustness
   try {
     expr = expr->IgnoreParenImpCasts();
     
@@ -191,7 +181,7 @@ std::string ArrayDependencyAnalyzer::exprToString(Expr* expr) {
       std::string lhs = exprToString(binOp->getLHS());
       std::string rhs = exprToString(binOp->getRHS());
       
-      // Prevent infinite recursion in complex expressions
+      // Avoid infinite recursion
       if (lhs == "complex_expr" || rhs == "complex_expr") {
         return "complex_expr";
       }
@@ -212,7 +202,6 @@ std::string ArrayDependencyAnalyzer::exprToString(Expr* expr) {
       return std::to_string(intLit->getValue().getSExtValue());
     }
     
-    // Handle more expression types safely
     if (auto* unaryOp = dyn_cast<UnaryOperator>(expr)) {
       std::string sub = exprToString(unaryOp->getSubExpr());
       switch (unaryOp->getOpcode()) {
@@ -224,7 +213,6 @@ std::string ArrayDependencyAnalyzer::exprToString(Expr* expr) {
     
     return "complex_expr";
   } catch (...) {
-    // Fallback for any unexpected issues
     return "error_expr";
   }
 }

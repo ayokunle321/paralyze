@@ -5,7 +5,6 @@
 
 namespace statik {
 
-// Forward declarations to avoid circular dependencies
 struct LoopInfo;
 struct GeneratedPragma;
 enum class PragmaType;

@@ -6,7 +6,6 @@ using namespace clang;
 namespace statik {
 
 void DependencyAnalyzer::analyzeDependencies(LoopInfo& loop) {
-  // Delegate to the new DependencyManager
   manager_->analyzeLoop(loop);
 }
 

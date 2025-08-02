@@ -11,7 +11,7 @@ struct ArrayAccess {
     clang::Expr* subscript;
     clang::SourceLocation location;
     unsigned line_number;
-    bool is_write;  // true if this is a write access, false if read
+    bool is_write;
     
     ArrayAccess(const std::string& name, clang::Expr* sub, 
                 clang::SourceLocation loc, unsigned line, bool write)
@@ -19,4 +19,4 @@ struct ArrayAccess {
           line_number(line), is_write(write) {}
 };
 
-} // namespace statik
+} // namespace stati

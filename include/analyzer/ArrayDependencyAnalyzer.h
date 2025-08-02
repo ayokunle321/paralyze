@@ -11,10 +11,10 @@
 namespace statik {
 
 enum class ArrayDependencyType {
-  NO_DEPENDENCY,        // A[i] and A[j] don't conflict
-  SAME_INDEX,          // A[i] and A[i] - potential conflict if one is write
-  CONSTANT_OFFSET,     // A[i] and A[i+1] - definite loop-carried dependency
-  UNKNOWN_RELATION     // Can't determine relationship - assume unsafe
+  NO_DEPENDENCY,
+  SAME_INDEX,          // A[i] and A[i] - write conflict
+  CONSTANT_OFFSET,     // A[i] and A[i+1] - loop-carried dependency  
+  UNKNOWN_RELATION     // Can't analyze - assume unsafe
 };
 
 struct ArrayDependency {
@@ -22,7 +22,7 @@ struct ArrayDependency {
   ArrayDependencyType type;
   unsigned source_line;
   unsigned sink_line;
-  std::string source_index;  // String representation of index expr
+  std::string source_index;
   std::string sink_index;
   
   ArrayDependency(const std::string& array, ArrayDependencyType dep_type,

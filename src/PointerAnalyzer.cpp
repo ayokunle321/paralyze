@@ -16,9 +16,6 @@ void PointerAnalyzer::analyzePointerUsage(LoopInfo& loop) {
              << loop.line_number << "\n";
   }
   
-  // The actual pointer detection happens through the visitor methods
-  // called from LoopVisitor and this method summarizes the results
-  
   PointerRisk risk = getPointerRisk(loop);
   
   if (verbose_) {
@@ -41,12 +38,11 @@ PointerRisk PointerAnalyzer::getPointerRisk(const LoopInfo& loop) const {
     return PointerRisk::SAFE;
   }
   
-  // Check for complex patterns that are definitely unsafe
   if (hasComplexPointerArithmetic() || hasMultiplePointerDereferences()) {
     return PointerRisk::UNSAFE;
   }
   
-  // Any pointer dereferences are potentially risky due to aliasing
+  // Any dereferencing is risky due to potential aliasing
   for (const auto& op : pointer_ops_) {
     if (op.is_dereference) {
       return PointerRisk::POTENTIAL_ALIAS;
@@ -66,7 +62,7 @@ void PointerAnalyzer::visitUnaryOperator(UnaryOperator* unaryOp, LoopInfo& loop)
   unsigned line = sm.getSpellingLineNumber(loc);
   
   switch (unaryOp->getOpcode()) {
-    case UO_Deref: { // *ptr
+    case UO_Deref: {
       std::string ptrName = extractPointerName(unaryOp->getSubExpr());
       if (!ptrName.empty()) {
         recordPointerOperation(ptrName, loc, true, false, false);
@@ -77,7 +73,7 @@ void PointerAnalyzer::visitUnaryOperator(UnaryOperator* unaryOp, LoopInfo& loop)
       }
       break;
     }
-    case UO_AddrOf: { // &var
+    case UO_AddrOf: {
       std::string varName = extractPointerName(unaryOp->getSubExpr());
       if (!varName.empty()) {
         recordPointerOperation(varName, loc, false, true, false);
@@ -92,7 +88,6 @@ void PointerAnalyzer::visitUnaryOperator(UnaryOperator* unaryOp, LoopInfo& loop)
     case UO_PostInc:
     case UO_PreDec:
     case UO_PostDec: {
-      // Check if incrementing/decrementing a pointer
       if (isPointerType(unaryOp->getSubExpr()->getType())) {
         std::string ptrName = extractPointerName(unaryOp->getSubExpr());
         if (!ptrName.empty()) {
@@ -115,12 +110,10 @@ void PointerAnalyzer::visitBinaryOperator(BinaryOperator* binOp, LoopInfo& loop)
     return;
   }
   
-  // Check for pointer arithmetic: ptr + offset, ptr - offset
   Expr* lhs = binOp->getLHS();
   Expr* rhs = binOp->getRHS();
   
   if (binOp->getOpcode() == BO_Add || binOp->getOpcode() == BO_Sub) {
-    // Check if left operand is a pointer
     if (isPointerType(lhs->getType())) {
       std::string ptrName = extractPointerName(lhs);
       if (!ptrName.empty()) {
@@ -137,7 +130,7 @@ void PointerAnalyzer::visitBinaryOperator(BinaryOperator* binOp, LoopInfo& loop)
     }
   }
   
-  // Check for pointer assignments that might create aliasing
+  // Check for pointer assignments that create aliasing
   if (binOp->isAssignmentOp()) {
     if (isPointerType(lhs->getType()) && isPointerType(rhs->getType())) {
       std::string lhsName = extractPointerName(lhs);
@@ -162,8 +155,7 @@ void PointerAnalyzer::visitMemberExpr(MemberExpr* memberExpr, LoopInfo& loop) {
     return;
   }
   
-  // Check for struct/class member access through pointers
-  if (memberExpr->isArrow()) { // ptr->member
+  if (memberExpr->isArrow()) {
     std::string ptrName = extractPointerName(memberExpr->getBase());
     if (!ptrName.empty()) {
       SourceLocation loc = memberExpr->getMemberLoc();
@@ -188,7 +180,6 @@ std::string PointerAnalyzer::extractPointerName(Expr* expr) {
     return "";
   }
   
-  // Use instance method with recursion limit to prevent infinite loops
   return extractPointerNameRecursive(expr, 0);
 }
 
@@ -209,7 +200,6 @@ std::string PointerAnalyzer::extractPointerNameRecursive(Expr* expr, int depth) 
   } else if (auto* arrayExpr = dyn_cast<ArraySubscriptExpr>(expr)) {
     return extractPointerNameRecursive(arrayExpr->getBase(), depth + 1);
   } else if (auto* binOp = dyn_cast<BinaryOperator>(expr)) {
-    // Handle pointer arithmetic like ptr + offset
     if (binOp->getOpcode() == BO_Add || binOp->getOpcode() == BO_Sub) {
       std::string lhs = extractPointerNameRecursive(binOp->getLHS(), depth + 1);
       if (!lhs.empty() && lhs != "complex_expr") {
@@ -221,7 +211,6 @@ std::string PointerAnalyzer::extractPointerNameRecursive(Expr* expr, int depth) 
       return "complex_expr";
     }
   } else if (auto* unaryOp = dyn_cast<UnaryOperator>(expr)) {
-    // Handle unary operations like *ptr, &var
     return extractPointerNameRecursive(unaryOp->getSubExpr(), depth + 1);
   } else {
     return "complex_expr";
@@ -246,7 +235,6 @@ bool PointerAnalyzer::hasComplexPointerArithmetic() const {
     }
   }
   
-  // More than 2 pointer arithmetic operations is getting complex
   return arithmetic_ops > 2;
 }
 
@@ -258,7 +246,6 @@ bool PointerAnalyzer::hasMultiplePointerDereferences() const {
     }
   }
   
-  // Multiple pointer dereferences suggest complex data structures
   return dereference_count > 3;
 }
 

@@ -19,12 +19,11 @@ void PragmaGenerator::generatePragmasForLoops(const std::vector<LoopInfo>& loops
       GeneratedPragma pragma(pragma_type, pragma_text, loop.loop_type, 
                            loop.line_number, reasoning);
       
-      // Check if we need private variable clauses
+      // Add private variables if needed
       std::vector<std::string> private_vars = identifyPrivateVariables(loop);
       if (!private_vars.empty()) {
         pragma.requires_private_vars = true;
         pragma.private_variables = private_vars;
-        // Add private clause to pragma text
         pragma.pragma_text += " private(";
         for (size_t i = 0; i < private_vars.size(); i++) {
           if (i > 0) pragma.pragma_text += ", ";
@@ -33,11 +32,10 @@ void PragmaGenerator::generatePragmasForLoops(const std::vector<LoopInfo>& loops
         pragma.pragma_text += ")";
       }
       
-      // Calculate confidence score BEFORE adding to vector
+      // Calculate confidence score
       if (confidence_scorer_) {
         pragma.confidence = confidence_scorer_->calculateConfidence(loop, pragma);
       } else {
-        // Fallback if confidence scorer is not initialized
         pragma.confidence.numerical_score = 0.5;
         pragma.confidence.level = ConfidenceLevel::MEDIUM;
         pragma.confidence.reasoning = "Confidence scorer not available";
@@ -66,26 +64,23 @@ void PragmaGenerator::generatePragmasForLoops(const std::vector<LoopInfo>& loops
 }
 
 PragmaType PragmaGenerator::determinePragmaType(const LoopInfo& loop) {
-  // Only generate pragmas for parallelizable loops
   if (loop.has_dependencies) {
     return PragmaType::NO_PRAGMA;
   }
   
-  // For nested loops, be more conservative
+  // Be conservative with nested loops
   if (loop.depth > 0) {
-    // Inner loops with simple array access might benefit from SIMD
     if (shouldUseSimd(loop)) {
       return PragmaType::SIMD;
     }
-    return PragmaType::NO_PRAGMA;  // Conservative for nested loops
+    return PragmaType::NO_PRAGMA;
   }
   
-  // For outermost loops, check if SIMD is beneficial
+  // For outermost loops, consider SIMD + parallelization
   if (shouldUseSimd(loop)) {
     return PragmaType::PARALLEL_FOR_SIMD;
   }
   
-  // Default to parallel for
   return PragmaType::PARALLEL_FOR;
 }
 
@@ -122,7 +117,7 @@ std::string PragmaGenerator::generateReasoning(PragmaType type, const LoopInfo& 
       break;
   }
   
-  // Add specific details about why this loop is good for parallelization
+  // Add extra details if available
   if (type != PragmaType::NO_PRAGMA) {
     if (loop.bounds.is_simple_pattern) {
       reason += " (simple iterator pattern)";
@@ -136,21 +131,17 @@ std::string PragmaGenerator::generateReasoning(PragmaType type, const LoopInfo& 
 }
 
 bool PragmaGenerator::shouldUseSimd(const LoopInfo& loop) {
-  // SIMD is beneficial for loops with:
-  // 1. Simple array access patterns
-  // 2. Arithmetic operations
-  // 3. No function calls (or only math functions)
-  
+  // SIMD works best with simple array access + arithmetic
   if (!hasSimpleArrayAccess(loop)) {
     return false;
   }
   
-  // Check if loop has primarily arithmetic operations
+  // Prefer arithmetic-heavy loops
   if (loop.metrics.arithmetic_ops > loop.metrics.function_calls * 2) {
     return true;
   }
   
-  // For inner loops, be more aggressive with SIMD
+  // Inner loops with memory access are good SIMD candidates
   if (isInnerLoop(loop) && loop.metrics.memory_accesses > 0) {
     return true;
   }
@@ -159,19 +150,16 @@ bool PragmaGenerator::shouldUseSimd(const LoopInfo& loop) {
 }
 
 bool PragmaGenerator::hasSimpleArrayAccess(const LoopInfo& loop) {
-  // Check if array accesses use simple patterns like A[i], B[i]
+  // TODO: Actually analyze subscript expressions for complexity
   for (const auto& access : loop.array_accesses) {
-    // For now, assume most array accesses in parallelizable loops are simple
-    // A more sophisticated check would analyze the subscript expressions
+    // Placeholder - should check if indices are simple patterns
   }
   
-  // If we have array accesses and the loop is parallelizable, 
-  // assume they're simple enough
+  // If loop is parallelizable and has array access, assume it's simple enough
   return !loop.array_accesses.empty();
 }
 
 bool PragmaGenerator::isInnerLoop(const LoopInfo& loop) {
-  // An inner loop has children but is not at depth 0
   return loop.depth > 0;
 }
 
@@ -181,13 +169,12 @@ std::vector<std::string> PragmaGenerator::identifyPrivateVariables(const LoopInf
   for (const auto& var_pair : loop.variables) {
     const auto& var = var_pair.second;
     
-    // Skip induction variables - they're automatically private
+    // Skip induction variables (automatically private in OpenMP)
     if (var.isInductionVariable()) {
       continue;
     }
     
-    // Variables that are only written or declared inside the loop
-    // should be private
+    // Loop-local variables that are written should be private
     if (var.scope == VariableScope::LOOP_LOCAL && var.hasWrites()) {
       private_vars.push_back(var.name);
     }

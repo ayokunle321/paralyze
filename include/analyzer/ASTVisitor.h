@@ -42,8 +42,7 @@ private:
 
 class AnalyzerConsumer : public clang::ASTConsumer {
 public:
-    explicit AnalyzerConsumer(clang::ASTContext* context)
-        : visitor_(context) {}
+    explicit AnalyzerConsumer(clang::ASTContext* context) : visitor_(context) {}
         
     void enablePragmaGeneration(const std::string& output_file, const std::string& input_file) {
         visitor_.enablePragmaGeneration(output_file, input_file);
