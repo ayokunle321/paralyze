@@ -12,8 +12,8 @@ namespace statik {
 enum class PragmaType {
   PARALLEL_FOR,       // #pragma omp parallel for
   PARALLEL_FOR_SIMD,  // #pragma omp parallel for simd
-  SIMD,              // #pragma omp simd
-  NO_PRAGMA          // Loop not suitable for parallelization
+  SIMD,               // #pragma omp simd
+  NO_PRAGMA           // Loop not suitable for parallelization
 };
 
 struct GeneratedPragma {

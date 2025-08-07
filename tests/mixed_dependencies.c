@@ -1,8 +1,4 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <math.h>
-
-// Test 1: Simple safe loop - should be parallelizable
+// Simple loop - safe
 void test_simple_safe() {
     int a[100], b[100], c[100];
     
@@ -11,7 +7,7 @@ void test_simple_safe() {
     }
 }
 
-// Test 2: Loop-carried dependency - unsafe
+// Loop-carried dependency - unsafe
 void test_loop_carried_dependency() {
     int arr[100];
     
@@ -20,7 +16,7 @@ void test_loop_carried_dependency() {
     }
 }
 
-// Test 3: Scalar variable dependency - unsafe
+// Scalar variable dependency - unsafe
 void test_scalar_dependency() {
     int data[50];
     int sum = 0;
@@ -31,7 +27,7 @@ void test_scalar_dependency() {
     }
 }
 
-// Test 4: Pointer operations - unsafe
+// Pointer operations - unsafe
 void test_pointer_operations() {
     int *ptr = malloc(100 * sizeof(int));
     int *base = ptr;
@@ -44,7 +40,7 @@ void test_pointer_operations() {
     free(base);
 }
 
-// Test 5: Function calls with side effects - unsafe
+// Function calls with side effects - unsafe
 void test_function_calls() {
     int values[80];
     
@@ -54,7 +50,7 @@ void test_function_calls() {
     }
 }
 
-// Test 6: Safe math functions - potentially safe
+// Safe math functions - potentially safe
 void test_math_functions() {
     double input[60];
     double output[60];
@@ -64,7 +60,7 @@ void test_math_functions() {
     }
 }
 
-// Test 7: Complex array indexing - unsafe
+// Complex array indexing - unsafe
 void test_complex_indexing() {
     int matrix[10][10];
     int indices[100];
@@ -76,7 +72,7 @@ void test_complex_indexing() {
     }
 }
 
-// Test 8: Cross-iteration conflicts
+// Cross-iteration conflicts
 void test_cross_iteration() {
     int buffer[200];
     
@@ -85,7 +81,7 @@ void test_cross_iteration() {
     }
 }
 
-// Test 9: Nested loops with different safety
+// Nested loops with different safety
 void test_nested_loops() {
     int data[20][20];
     
@@ -99,7 +95,7 @@ void test_nested_loops() {
     }
 }
 
-// Test 10: Pointer aliasing potential
+// Pointer aliasing potential
 void test_pointer_aliasing() {
     int array[150];
     int *ptr1 = &array[0];
@@ -112,7 +108,7 @@ void test_pointer_aliasing() {
     }
 }
 
-// Test 11: Write-only pattern - safe
+// Write-only pattern - safe
 void test_write_only() {
     int results[300];
     
@@ -121,7 +117,7 @@ void test_write_only() {
     }
 }
 
-// Test 12: Reduction with local variable - mixed safety
+// Reduction with local variable - mixed safety
 void test_reduction_local() {
     int source[100];
     int total = 0;

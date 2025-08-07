@@ -95,7 +95,10 @@ bool LoopVisitor::VisitVarDecl(VarDecl* varDecl) {
     SourceLocation loc = varDecl->getLocation();
     VariableInfo varInfo(varName, varDecl, scope, loc);
 
-    getCurrentLoop()->addVariable(varInfo);
+    if (loop_stack_.empty()) {
+        return true;
+    }
+    loop_stack_.top()->addVariable(varInfo);
 
     return true;
 }
@@ -113,19 +116,23 @@ bool LoopVisitor::VisitDeclRefExpr(DeclRefExpr* declRef) {
 
         bool isWrite = isWriteAccess(declRef);
         bool isRead = !isWrite;
-        VariableUsage usage(loc, line, isRead, isWrite);
 
-        LoopInfo* currentLoop = getCurrentLoop();
+        VariableUsage usage(loc, line, isRead, isWrite);
+        
+        if (loop_stack_.empty()) {
+            return true;
+        }
+        LoopInfo* currentLoop = loop_stack_.top();
+        
         auto it = currentLoop->variables.find(varName);
         if (it == currentLoop->variables.end()) {
             VariableScope scope = determineVariableScope(varDecl);
             VariableInfo varInfo(varName, varDecl, scope, varDecl->getLocation());
             currentLoop->addVariable(varInfo);
         }
-
+        
         currentLoop->addVariableUsage(varName, usage);
     }
-
     return true;
 }
 
@@ -388,20 +395,68 @@ bool LoopVisitor::isComparisonOp(BinaryOperator* binOp) {
 }
 
 VariableScope LoopVisitor::determineVariableScope(VarDecl* varDecl) const {
-    // TODO: Improve scope detection logic
     if (!varDecl) {
         return VariableScope::GLOBAL;
     }
-
-    SourceManager& sm = context_->getSourceManager();
+    
     SourceLocation declLoc = varDecl->getLocation();
-
-    if (!isInsideLoop()) {
+    if (declLoc.isInvalid()) {
+        return VariableScope::GLOBAL;
+    }
+    
+    // If not analyzing any loop, variable is function-scoped
+    if (loop_stack_.empty()) {
         return VariableScope::FUNCTION_LOCAL;
     }
-
-    // Simple heuristic for now
-    return VariableScope::LOOP_LOCAL;
+    
+    // Get current loop from stack (const-safe access)
+    if (loop_stack_.empty()) {
+        return VariableScope::FUNCTION_LOCAL;
+    }
+    LoopInfo* currentLoop = loop_stack_.top();
+    if (!currentLoop || !currentLoop->stmt) {
+        return VariableScope::FUNCTION_LOCAL;
+    }
+    
+    // Get loop boundaries for comparison
+    SourceLocation loopStart = currentLoop->stmt->getBeginLoc();
+    SourceLocation loopEnd = currentLoop->stmt->getEndLoc();
+    
+    if (loopStart.isInvalid() || loopEnd.isInvalid()) {
+        return VariableScope::FUNCTION_LOCAL;
+    }
+    
+    SourceManager& sm = context_->getSourceManager();
+    
+    // Check if variable declared inside loop body
+    if (sm.getFileID(declLoc) == sm.getFileID(loopStart)) {
+        unsigned declOffset = sm.getFileOffset(declLoc);
+        unsigned loopStartOffset = sm.getFileOffset(loopStart);
+        unsigned loopEndOffset = sm.getFileOffset(loopEnd);
+        
+        if (declOffset > loopStartOffset && declOffset < loopEndOffset) {
+            if (verbose_) {
+                std::cout << "  Variable '" << varDecl->getNameAsString() 
+                         << "' declared inside loop body -> LOOP_LOCAL\n";
+            }
+            return VariableScope::LOOP_LOCAL;
+        }
+    }
+    
+    // Handle for-loop induction variables (e.g., "for(int i = 0; ...)")
+    if (auto* forLoop = dyn_cast<ForStmt>(currentLoop->stmt)) {
+        if (auto* declStmt = dyn_cast_or_null<DeclStmt>(forLoop->getInit())) {
+            if (declStmt->isSingleDecl() && declStmt->getSingleDecl() == varDecl) {
+                if (verbose_) {
+                    std::cout << "  Variable '" << varDecl->getNameAsString() 
+                             << "' is for-loop induction variable -> LOOP_LOCAL\n";
+                }
+                return VariableScope::LOOP_LOCAL;
+            }
+        }
+    }
+    
+    return VariableScope::FUNCTION_LOCAL;
 }
 
 void LoopVisitor::addLoop(Stmt* stmt, SourceLocation loc, const std::string& type) {

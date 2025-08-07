@@ -80,6 +80,7 @@ void DependencyManager::runScalarAnalysis(LoopInfo& loop) {
   for (const auto& var_pair : loop.variables) {
     const auto& var = var_pair.second;
     
+    // Skip induction variables as OpenMP handles them automatically
     if (var.isInductionVariable()) {
       if (verbose_) {
         std::cout << "  " << var.name << ": INDUCTION VARIABLE (safe)\n";
@@ -87,12 +88,21 @@ void DependencyManager::runScalarAnalysis(LoopInfo& loop) {
       continue;
     }
     
+    // Check for read-after-write dependencies
     if (var.hasReads() && var.hasWrites()) {
-      if (verbose_) {
-        std::cout << "  " << var.name << ": READ+WRITE dependency detected\n";
+      if (var.scope == VariableScope::LOOP_LOCAL) {
+        // Loop-local variables are safe as each iteration gets its own copy
+        if (verbose_) {
+          std::cout << "  " << var.name << ": LOCAL VARIABLE (safe)\n";
+        }
+      } else {
+        // Function/global scope variables with read+write are unsafe
+        if (verbose_) {
+          std::cout << "  " << var.name << ": READ+WRITE dependency detected\n";
+        }
+        recordWarning("Scalar variable '" + var.name + "' has read-after-write dependency");
+        found_scalar_deps = true;
       }
-      recordWarning("Scalar variable '" + var.name + "' has read-after-write dependency");
-      found_scalar_deps = true;
     } else if (var.hasWrites()) {
       if (verbose_) {
         std::cout << "  " << var.name << ": WRITE-ONLY (safe)\n";

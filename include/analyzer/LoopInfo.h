@@ -60,7 +60,10 @@ struct LoopInfo {
     }
     
     void addVariable(const VariableInfo& var_info) {
-        variables.insert({var_info.name, var_info});
+        auto it = variables.find(var_info.name);
+        if (it == variables.end()) {
+            variables.emplace(var_info.name, var_info);
+        }
     }
     
     void addVariableUsage(const std::string& var_name, const VariableUsage& usage) {
