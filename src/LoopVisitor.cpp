@@ -477,73 +477,87 @@ void LoopVisitor::addLoop(Stmt* stmt, SourceLocation loc, const std::string& typ
 }
 
 void LoopVisitor::printLoopSummary() const {
-    std::cout << "\n=== Analysis Results ===\n";
+    std::cout << "\n=== Loop Analysis Results ===\n";
+    
     if (loops_.empty()) {
         std::cout << "No loops detected in the analyzed code.\n";
+        std::cout << "============================\n";
         return;
     }
 
-    std::cout << "Loop   Location    Type     Status          Reason\n";
-    std::cout << "----   --------    ----     ------          ------\n";
-
+    // Count parallelizable loops
     size_t parallelizable_count = 0;
+    for (const auto& loop : loops_) {
+        if (loop.isParallelizable()) {
+            parallelizable_count++;
+        }
+    }
+
+    std::cout << "Found " << loops_.size() << " loop" << (loops_.size() > 1 ? "s" : "") 
+              << ", " << parallelizable_count << " parallelizable\n\n";
+
+    std::cout << "┌─────┬──────┬───────────┬─────────────────┬──────────────────────────┐\n";
+    std::cout << "│ ID  │ Line │ Type      │ Status          │ Reason                   │\n";
+    std::cout << "├─────┼──────┼───────────┼─────────────────┼──────────────────────────┤\n";
+
     for (size_t i = 0; i < loops_.size(); i++) {
         const auto& loop = loops_[i];
+        
+        // Format ID
+        std::cout << "│ L" << (i + 1);
+        if (i + 1 < 10) std::cout << "  │";
+        else std::cout << " │";
 
-        std::cout << "L" << (i + 1);
-        std::cout << "     line " << loop.line_number;
-        if (loop.line_number < 10) std::cout << "    ";
-        else if (loop.line_number < 100) std::cout << "   ";
-        else std::cout << "  ";
+        // Format line number
+        std::cout << " " << std::setw(4) << loop.line_number << " │";
 
-        std::cout << "  " << loop.loop_type;
-        if (loop.loop_type.length() < 5) std::cout << "  ";
+        // Format type
+        std::string type = loop.loop_type;
+        std::cout << " " << std::setw(9) << std::left << type << " │";
 
         // Determine status and reasoning
         std::string status, reason;
         if (loop.isParallelizable()) {
-            status = "PARALLELIZABLE";
-            parallelizable_count++;
+            status = "SAFE";
+            
             if (loop.bounds.is_simple_pattern && !loop.array_accesses.empty()) {
                 reason = "Simple array operations";
             } else if (loop.bounds.is_simple_pattern) {
                 reason = "Simple iterator pattern";
             } else {
-                reason = "No dependencies detected";
+                reason = "No dependencies";
             }
         } else {
             status = "UNSAFE";
-            bool has_array_deps = false;
-            bool has_function_calls = false;
-
+            
             if (loop.hasUnsafeFunctionCalls()) {
-                has_function_calls = true;
-            }
-
-            if (!has_function_calls && loop.has_dependencies) {
-                has_array_deps = true;
-            }
-
-            if (has_function_calls && has_array_deps) {
-                reason = "Function calls + dependencies";
-            } else if (has_function_calls) {
                 reason = "Function call side effects";
-            } else if (has_array_deps) {
+            } else if (loop.has_dependencies) {
                 reason = "Loop-carried dependency";
             } else {
                 reason = "Complex dependencies";
             }
         }
 
-        std::cout << "  " << status;
-        for (int pad = status.length(); pad < 15; pad++) {
-            std::cout << " ";
+        // Format status
+        std::cout << " " << std::setw(15) << std::left << status << " │";
+        
+        // Format reason (truncate if too long)
+        if (reason.length() > 24) {
+            reason = reason.substr(0, 21) + "...";
         }
-        std::cout << " " << reason << "\n";
+        std::cout << " " << std::setw(24) << std::left << reason << " │\n";
     }
 
-    std::cout << "\nParallelizable: " << parallelizable_count << "/" << loops_.size()
-              << " loops (" << (loops_.size() > 0 ? (parallelizable_count * 100 / loops_.size()) : 0) << "%)\n";
+    // Table footer
+    std::cout << "└─────┴──────┴───────────┴─────────────────┴──────────────────────────┘\n";
+
+    // Summary
+    std::cout << "\nSummary:\n";
+    std::cout << "  Parallelizable: " << parallelizable_count << "/" << loops_.size()
+              << " (" << (loops_.size() > 0 ? (parallelizable_count * 100 / loops_.size()) : 0) << "%)\n";
+    
+    std::cout << "============================\n";
 }
 
 } // namespace statik

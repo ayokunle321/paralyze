@@ -27,16 +27,15 @@ bool AnalyzerVisitor::VisitFunctionDecl(FunctionDecl* func) {
         std::cout << "\n";
     }
 
-    // Let the loop visitor handle loop detection
     loop_visitor_.TraverseStmt(func->getBody());
     return true;
 }
 
 void AnalyzerVisitor::runAnalysis() {
-    // Always run the loop analysis and print summary
+    // Always show the analysis results first
     loop_visitor_.printLoopSummary();
     
-    // If pragma generation is enabled, run the full pipeline
+    // Pragma generation is optional
     if (generate_pragmas_) {
         const auto& detected_loops = loop_visitor_.getLoops();
         
@@ -53,22 +52,21 @@ void AnalyzerVisitor::runAnalysis() {
         }
         
         try {
-            // Initialize the pragma generation components
+            // Set up the pragma generation pipeline
             PragmaGenerator pragma_gen;
             PragmaLocationMapper location_mapper(&context_->getSourceManager());
             SourceAnnotator annotator(&context_->getSourceManager());
             
-            // Generate pragmas for parallelizable loops
+            // Generate pragmas for all loops (safe and unsafe)
             pragma_gen.generatePragmasForLoops(detected_loops);
             
-            // Map pragma insertion locations
+            // Only map insertion points for parallelizable loops
             for (const auto& loop : detected_loops) {
                 if (!loop.has_dependencies) {
                     location_mapper.mapLoopToPragmaLocation(loop);
                 }
             }
             
-            // Use the input filename passed from main
             std::string input_filename = input_filename_;
             
             if (input_filename.empty()) {
@@ -76,19 +74,17 @@ void AnalyzerVisitor::runAnalysis() {
                 return;
             }
             
-            // Create annotated source file
+            // Create the annotated source file
             annotator.annotateSourceWithPragmas(input_filename,
                                                pragma_gen.getGeneratedPragmas(),
                                                location_mapper.getInsertionPoints());
             
-            // Write the output file with OpenMP header
             if (annotator.writeAnnotatedFile(output_filename_)) {
                 if (verbose_) {
                     std::cout << "Successfully created: " << output_filename_ << "\n";
                     std::cout << "Note: Compile with 'gcc -fopenmp " << output_filename_ 
                              << "' for OpenMP support\n";
                     
-                    // Show summary
                     pragma_gen.printPragmaSummary();
                     annotator.printAnnotationSummary();
                 }
@@ -122,20 +118,20 @@ void ArrayDependencyAnalyzer::analyzeArrayDependencies(LoopInfo& loop) {
              << loop.array_accesses.size() << " array accesses\n";
   }
   
-  // Compare every pair of array accesses for basic conflicts
+  // Check all pairs of array accesses for conflicts
   for (size_t i = 0; i < loop.array_accesses.size(); i++) {
     for (size_t j = i + 1; j < loop.array_accesses.size(); j++) {
       const ArrayAccess& access1 = loop.array_accesses[i];
       const ArrayAccess& access2 = loop.array_accesses[j];
       
-      // Only check accesses to the same array
       if (access1.array_name == access2.array_name) {
         checkArrayAccessPair(access1, access2, loop.bounds.iterator_var);
       }
     }
   }
   
-  // Run cross-iteration analysis for more sophisticated conflict detection
+  // Run cross-iteration analysis 
+  cross_iteration_analyzer_->setVerbose(verbose_); 
   cross_iteration_analyzer_->analyzeCrossIterationConflicts(loop);
   
   if (verbose_) {
@@ -145,14 +141,12 @@ void ArrayDependencyAnalyzer::analyzeArrayDependencies(LoopInfo& loop) {
 }
 
 bool ArrayDependencyAnalyzer::hasArrayDependencies(const LoopInfo& loop) const {
-  // Check basic array dependencies
   for (const auto& dep : detected_dependencies_) {
     if (dep.type != ArrayDependencyType::NO_DEPENDENCY) {
       return true;
     }
   }
   
-  // Check cross-iteration conflicts
   if (cross_iteration_analyzer_->hasCrossIterationConflicts(loop)) {
     return true;
   }
@@ -163,7 +157,7 @@ bool ArrayDependencyAnalyzer::hasArrayDependencies(const LoopInfo& loop) const {
 void ArrayDependencyAnalyzer::checkArrayAccessPair(const ArrayAccess& access1, 
                                                    const ArrayAccess& access2,
                                                    const std::string& induction_var) {
-  // Skip if both are just reads - no dependency
+  // Skip read-only pairs
   if (!access1.is_write && !access2.is_write) {
     return;
   }
@@ -211,35 +205,31 @@ ArrayDependencyType ArrayDependencyAnalyzer::compareArrayIndices(Expr* index1,
     return ArrayDependencyType::UNKNOWN_RELATION;
   }
   
-  // Add safety checks to prevent crashes on malformed expressions
   try {
     std::string idx1_str = exprToString(index1);
     std::string idx2_str = exprToString(index2);
     
-    // If expression parsing failed, be conservative
     if (idx1_str == "error_expr" || idx2_str == "error_expr") {
       return ArrayDependencyType::UNKNOWN_RELATION;
     }
     
-    // Check if both are simple induction variable accesses (A[i] and A[i])
+    // Check for A[i] vs A[i] pattern
     if (isSimpleInductionAccess(index1, induction_var) && 
         isSimpleInductionAccess(index2, induction_var)) {
       return ArrayDependencyType::SAME_INDEX;
     }
     
-    // Check for constant offset patterns like A[i] vs A[i+1]
+    // Check for offset patterns like A[i] vs A[i+1]
     if (hasConstantOffset(index1, index2)) {
       return ArrayDependencyType::CONSTANT_OFFSET;
     }
     
-    // If indices look different but we can't prove they don't conflict
     if (idx1_str != idx2_str) {
       return ArrayDependencyType::UNKNOWN_RELATION;
     }
     
     return ArrayDependencyType::NO_DEPENDENCY;
   } catch (...) {
-    // Conservative fallback - assume unsafe if analysis fails
     return ArrayDependencyType::UNKNOWN_RELATION;
   }
 }
@@ -250,7 +240,6 @@ bool ArrayDependencyAnalyzer::isSimpleInductionAccess(Expr* index,
     return false;
   }
   
-  // Look for simple DeclRefExpr that matches induction variable
   index = index->IgnoreParenImpCasts();
   if (auto* declRef = dyn_cast<DeclRefExpr>(index)) {
     return declRef->getDecl()->getNameAsString() == induction_var;
@@ -264,15 +253,14 @@ bool ArrayDependencyAnalyzer::hasConstantOffset(Expr* index1, Expr* index2) {
     return false;
   }
   
-  // This is a simplified check - real implementation would need more sophisticated
-  // expression analysis to detect patterns like i vs i+1, i vs i-1, etc.
+  // TODO: Improve this - current implementation is pretty basic
   std::string str1 = exprToString(index1);
   std::string str2 = exprToString(index2);
   
-  // Look for obvious patterns like "i" vs "i + 1" or "i" vs "i - 1"
+  // Look for arithmetic patterns 
   if ((str1.find("+") != std::string::npos || str1.find("-") != std::string::npos) &&
       (str2.find("+") != std::string::npos || str2.find("-") != std::string::npos)) {
-    return true;  // Conservative: assume any arithmetic means potential offset
+    return true;
   }
   
   return false;
@@ -283,7 +271,6 @@ std::string ArrayDependencyAnalyzer::exprToString(Expr* expr) {
     return "null";
   }
   
-  // Add try-catch equivalent behavior for robustness
   try {
     expr = expr->IgnoreParenImpCasts();
     
@@ -298,7 +285,7 @@ std::string ArrayDependencyAnalyzer::exprToString(Expr* expr) {
       std::string lhs = exprToString(binOp->getLHS());
       std::string rhs = exprToString(binOp->getRHS());
       
-      // Prevent infinite recursion in complex expressions
+      // Avoid infinite recursion
       if (lhs == "complex_expr" || rhs == "complex_expr") {
         return "complex_expr";
       }
@@ -319,7 +306,6 @@ std::string ArrayDependencyAnalyzer::exprToString(Expr* expr) {
       return std::to_string(intLit->getValue().getSExtValue());
     }
     
-    // Handle more expression types safely
     if (auto* unaryOp = dyn_cast<UnaryOperator>(expr)) {
       std::string sub = exprToString(unaryOp->getSubExpr());
       switch (unaryOp->getOpcode()) {
@@ -331,7 +317,6 @@ std::string ArrayDependencyAnalyzer::exprToString(Expr* expr) {
     
     return "complex_expr";
   } catch (...) {
-    // Fallback for any unexpected issues
     return "error_expr";
   }
 }
@@ -341,20 +326,21 @@ std::string ArrayDependencyAnalyzer::exprToString(Expr* expr) {
 #include "analyzer/PragmaGenerator.h"
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 
 namespace statik {
 
 ConfidenceScore ConfidenceScorer::calculateConfidence(const LoopInfo& loop, const GeneratedPragma& pragma) {
   ConfidenceScore score;
   
-  // Calculate individual scores
+  // Score different aspects of the loop
   double loop_score = scoreLoopCharacteristics(loop);
   double pragma_score = scorePragmaType(pragma.type);
   double complexity_score = scoreComplexity(loop);
   double data_score = scoreDataAccess(loop);
   double dependency_score = scoreDependencyAnalysis(loop);
   
-  // Weighted combination
+  // Weighted combination (could tune these weights later)
   double weights[] = {0.25, 0.15, 0.20, 0.20, 0.20};
   double scores[] = {loop_score, pragma_score, complexity_score, data_score, dependency_score};
   
@@ -363,15 +349,13 @@ ConfidenceScore ConfidenceScorer::calculateConfidence(const LoopInfo& loop, cons
     score.numerical_score += weights[i] * scores[i];
   }
   
-  // Clamp to valid range
   score.numerical_score = std::max(0.0, std::min(1.0, score.numerical_score));
   score.level = convertToLevel(score.numerical_score);
   
-  // Collect positive and negative factors
+  // Build list of factors that influenced the score
   std::vector<std::string> positive_factors;
   std::vector<std::string> negative_factors;
   
-  // Analyze factors
   if (loop.bounds.is_simple_pattern) {
     positive_factors.push_back("Simple iterator pattern detected");
   }
@@ -406,9 +390,8 @@ ConfidenceScore ConfidenceScorer::calculateConfidence(const LoopInfo& loop, cons
 }
 
 double ConfidenceScorer::scoreLoopCharacteristics(const LoopInfo& loop) {
-  double score = 0.5; // Base score
+  double score = 0.5;
   
-  // Simple patterns boost confidence
   if (loop.bounds.is_simple_pattern) {
     score += 0.3;
   }
@@ -417,10 +400,9 @@ double ConfidenceScorer::scoreLoopCharacteristics(const LoopInfo& loop) {
   if (loop.depth == 0) {
     score += 0.2;
   } else {
-    score -= 0.1 * loop.depth; // Penalty for nesting
+    score -= 0.1 * loop.depth;
   }
   
-  // Hot loops are good candidates
   if (loop.isHot()) {
     score += 0.1;
   }
@@ -431,11 +413,11 @@ double ConfidenceScorer::scoreLoopCharacteristics(const LoopInfo& loop) {
 double ConfidenceScorer::scorePragmaType(PragmaType type) {
   switch (type) {
     case PragmaType::PARALLEL_FOR:
-      return 0.8; // High confidence for basic parallel for
+      return 0.8;
     case PragmaType::PARALLEL_FOR_SIMD:
-      return 0.7; // Slightly lower for combined approach
+      return 0.7;
     case PragmaType::SIMD:
-      return 0.6; // SIMD only is more specialized
+      return 0.6;
     case PragmaType::NO_PRAGMA:
     default:
       return 0.0;
@@ -443,42 +425,40 @@ double ConfidenceScorer::scorePragmaType(PragmaType type) {
 }
 
 double ConfidenceScorer::scoreComplexity(const LoopInfo& loop) {
-  double score = 1.0; // Start high
+  double score = 1.0;
   
-  // Penalize based on complexity indicators
+  // Function calls add complexity
   if (loop.metrics.function_calls > 2) {
     score -= 0.3;
   } else if (loop.metrics.function_calls > 0) {
     score -= 0.1;
   }
   
-  // Too many variables suggests complexity
+  // Too many variables might indicate complexity
   if (loop.variables.size() > 8) {
     score -= 0.3;
   } else if (loop.variables.size() > 5) {
     score -= 0.1;
   }
   
-  // Complex arithmetic patterns
+  // Heavy arithmetic might be complex
   if (loop.metrics.arithmetic_ops > 10) {
-    score -= 0.1; // Might indicate complex calculations
+    score -= 0.1;
   }
   
   return std::max(0.0, std::min(1.0, score));
 }
 
 double ConfidenceScorer::scoreDataAccess(const LoopInfo& loop) {
-  double score = 0.5; // Neutral starting point
+  double score = 0.5;
   
-  // Array accesses are good for parallelization
   if (!loop.array_accesses.empty()) {
     score += 0.3;
     
-    // Simple access patterns boost confidence
+    // TODO: Actually analyze access patterns for complexity
     bool has_simple_access = true;
     for (const auto& access : loop.array_accesses) {
-      // For now, assume accesses are simple if we got this far
-      // More sophisticated analysis would check index expressions
+      // Placeholder - should check index expressions
     }
     
     if (has_simple_access) {
@@ -486,7 +466,6 @@ double ConfidenceScorer::scoreDataAccess(const LoopInfo& loop) {
     }
   }
   
-  // Memory-intensive loops benefit from parallelization
   if (loop.metrics.memory_accesses > 5) {
     score += 0.1;
   }
@@ -495,20 +474,19 @@ double ConfidenceScorer::scoreDataAccess(const LoopInfo& loop) {
 }
 
 double ConfidenceScorer::scoreDependencyAnalysis(const LoopInfo& loop) {
-  // If we're generating a pragma, dependencies should be clean
   if (loop.has_dependencies) {
-    return 0.0; // No confidence if dependencies detected
+    return 0.0; // Can't be confident if there are dependencies
   }
   
-  double score = 0.8; // High base score for clean loops
+  double score = 0.8;
   
-  // Boost confidence if analysis was thorough
+  // More thorough analysis = higher confidence
   if (!loop.variables.empty()) {
-    score += 0.1; // We analyzed variables
+    score += 0.1;
   }
   
   if (!loop.array_accesses.empty()) {
-    score += 0.1; // We analyzed array patterns
+    score += 0.1;
   }
   
   return std::max(0.0, std::min(1.0, score));
@@ -542,25 +520,20 @@ std::string ConfidenceScorer::getConfidenceDescription(ConfidenceLevel level) co
 std::string ConfidenceScorer::generateReasoning(const LoopInfo& loop, const GeneratedPragma& pragma,
                                                const std::vector<std::string>& pos_factors,
                                                const std::vector<std::string>& neg_factors) {
-  std::string reasoning = "Confidence based on: ";
-  
+  std::string reasoning = "\n  Confidence based on:\n";
   if (!pos_factors.empty()) {
-    reasoning += "Positive factors: ";
-    for (size_t i = 0; i < pos_factors.size(); i++) {
-      if (i > 0) reasoning += ", ";
-      reasoning += pos_factors[i];
-    }
+      reasoning += "\n    Positive factors:\n";
+      for (const auto& factor : pos_factors) {
+          reasoning += "      - " + factor + "\n";
+      }
   }
-  
+
   if (!neg_factors.empty()) {
-    if (!pos_factors.empty()) reasoning += ". ";
-    reasoning += "Negative factors: ";
-    for (size_t i = 0; i < neg_factors.size(); i++) {
-      if (i > 0) reasoning += ", ";
-      reasoning += neg_factors[i];
-    }
+      reasoning += "\n    Negative factors:\n";
+      for (const auto& factor : neg_factors) {
+          reasoning += "      - " + factor + "\n";
+      }
   }
-  
   return reasoning;
 }
 
@@ -642,8 +615,23 @@ void CrossIterationAnalyzer::analyzeArrayAccessPattern(const std::string& array_
                                                              offset1, offset2, stride);
         
         if (conflict_type != IterationConflictType::NO_CONFLICT) {
-          std::string pattern = induction_var + "+" + std::to_string(offset1) + 
-                               " vs " + induction_var + "+" + std::to_string(offset2);
+          // Format the pattern correctly
+          std::string pattern1 = induction_var;
+          std::string pattern2 = induction_var;
+          
+          if (offset1 > 0) {
+            pattern1 += "+" + std::to_string(offset1);
+          } else if (offset1 < 0) {
+            pattern1 += std::to_string(offset1);
+          }
+          
+          if (offset2 > 0) {
+            pattern2 += "+" + std::to_string(offset2);
+          } else if (offset2 < 0) {
+            pattern2 += std::to_string(offset2);
+          }
+          
+          std::string pattern = pattern1 + " vs " + pattern2;
           std::string desc = describeConflict(conflict_type, array_name, pattern);
           
           CrossIterationConflict conflict(array_name, conflict_type, pattern,
@@ -794,7 +782,6 @@ using namespace clang;
 namespace statik {
 
 void DependencyAnalyzer::analyzeDependencies(LoopInfo& loop) {
-  // Delegate to the new DependencyManager
   manager_->analyzeLoop(loop);
 }
 
@@ -857,7 +844,7 @@ void DependencyManager::analyzeLoop(LoopInfo& loop) {
           }
         }
       }
-      std::cout << "====================================\n\n";
+      std::cout << "======================================================\n\n";
     }
     
   } catch (const std::exception& e) {
@@ -884,6 +871,7 @@ void DependencyManager::runScalarAnalysis(LoopInfo& loop) {
   for (const auto& var_pair : loop.variables) {
     const auto& var = var_pair.second;
     
+    // Skip induction variables as OpenMP handles them automatically
     if (var.isInductionVariable()) {
       if (verbose_) {
         std::cout << "  " << var.name << ": INDUCTION VARIABLE (safe)\n";
@@ -891,12 +879,21 @@ void DependencyManager::runScalarAnalysis(LoopInfo& loop) {
       continue;
     }
     
+    // Check for read-after-write dependencies
     if (var.hasReads() && var.hasWrites()) {
-      if (verbose_) {
-        std::cout << "  " << var.name << ": READ+WRITE dependency detected\n";
+      if (var.scope == VariableScope::LOOP_LOCAL) {
+        // Loop-local variables are safe as each iteration gets its own copy
+        if (verbose_) {
+          std::cout << "  " << var.name << ": LOCAL VARIABLE (safe)\n";
+        }
+      } else {
+        // Function/global scope variables with read+write are unsafe
+        if (verbose_) {
+          std::cout << "  " << var.name << ": READ+WRITE dependency detected\n";
+        }
+        recordWarning("Scalar variable '" + var.name + "' has read-after-write dependency");
+        found_scalar_deps = true;
       }
-      recordWarning("Scalar variable '" + var.name + "' has read-after-write dependency");
-      found_scalar_deps = true;
     } else if (var.hasWrites()) {
       if (verbose_) {
         std::cout << "  " << var.name << ": WRITE-ONLY (safe)\n";
@@ -1059,9 +1056,6 @@ void FunctionCallAnalyzer::analyzeFunctionCalls(LoopInfo& loop) {
              << loop.line_number << "\n";
   }
   
-  // Function call detection happens through visitCallExpr
-  // This method summarizes the safety assessment
-  
   FunctionCallSafety safety = getFunctionCallSafety(loop);
   
   if (verbose_) {
@@ -1080,17 +1074,14 @@ void FunctionCallAnalyzer::analyzeFunctionCalls(LoopInfo& loop) {
 }
 
 FunctionCallSafety FunctionCallAnalyzer::getFunctionCallSafety(const LoopInfo& loop) const {
-  // Check the stored function call info in LoopInfo
   if (loop.detected_function_calls.empty()) {
     return FunctionCallSafety::SAFE;
   }
   
-  // Check the stored safety flags
   if (loop.hasUnsafeFunctionCalls()) {
     return FunctionCallSafety::UNSAFE;
   }
   
-  // If we have function calls but they're all safe, check if they're math functions
   bool has_potentially_safe_calls = !loop.detected_function_calls.empty();
   
   if (has_potentially_safe_calls) {
@@ -1136,7 +1127,7 @@ void FunctionCallAnalyzer::visitCallExpr(CallExpr* callExpr, LoopInfo& loop) {
 }
 
 void FunctionCallAnalyzer::initializeSafeFunctions() {
-  // Common math functions that are generally safe for parallelization
+  // Math functions that don't have side effects
   safe_math_functions_ = {
     "sin", "cos", "tan", "asin", "acos", "atan", "atan2",
     "sinh", "cosh", "tanh", "asinh", "acosh", "atanh",
@@ -1172,7 +1163,7 @@ std::string FunctionCallAnalyzer::getFunctionName(CallExpr* callExpr) const {
       }
     }
     
-    // Try to get name from function pointer or member call
+    // Handle function pointers and member calls
     if (Expr* callee = callExpr->getCallee()) {
       callee = callee->IgnoreParenImpCasts();
       
@@ -1189,7 +1180,6 @@ std::string FunctionCallAnalyzer::getFunctionName(CallExpr* callExpr) const {
       }
     }
   } catch (...) {
-    // Return safe default if anything goes wrong
     return "unknown_function";
   }
   
@@ -1197,14 +1187,13 @@ std::string FunctionCallAnalyzer::getFunctionName(CallExpr* callExpr) const {
 }
 
 bool FunctionCallAnalyzer::hasPotentialSideEffects(const std::string& function_name) const {
-  // Conservative approach: assume unknown functions have side effects
+  // Be conservative - assume unknown functions have side effects
   
-  // Known safe functions
   if (isSafeMathFunction(function_name)) {
     return false;
   }
   
-  // Functions that are generally safe (read-only operations)
+  // Read-only string/char functions
   static const std::set<std::string> safe_functions = {
     "strlen", "strcmp", "strncmp", "strchr", "strstr",
     "memcmp", "isalpha", "isdigit", "isspace", "toupper", "tolower"
@@ -1227,7 +1216,7 @@ bool FunctionCallAnalyzer::hasPotentialSideEffects(const std::string& function_n
     return true;
   }
   
-  // Conservative default: assume unknown functions have side effects
+  // Default to unsafe for unknown functions
   return true;
 }
 
@@ -1243,223 +1232,195 @@ using namespace clang;
 namespace statik {
 
 bool LoopVisitor::VisitForStmt(ForStmt* forLoop) {
-  if (!forLoop) {
+    if (!forLoop) {
+        return true;
+    }
+
+    SourceLocation loc = forLoop->getForLoc();
+    addLoop(forLoop, loc, "for");
+
+    LoopInfo* newLoop = &loops_.back();
+    if (!loop_stack_.empty()) {
+        newLoop->setParent(loop_stack_.top());
+    }
+
+    analyzeForLoopBounds(forLoop, *newLoop);
+
+    // Process the loop body
+    loop_stack_.push(newLoop);
+    if (forLoop->getBody()) {
+        TraverseStmt(forLoop->getBody());
+    }
+
+    markInductionVariable(*newLoop);
+    finalizeDependencyAnalysis(*newLoop);
+    newLoop->finalizeMetrics();
+    loop_stack_.pop();
     return true;
-  }
-
-  SourceLocation loc = forLoop->getForLoc();
-  addLoop(forLoop, loc, "for");
-
-  // Get the newly added loop and set up parent relationship
-  LoopInfo* newLoop = &loops_.back();
-  if (!loop_stack_.empty()) {
-    newLoop->setParent(loop_stack_.top());
-  }
-
-  // Analyze loop bounds and identify induction variable
-  analyzeForLoopBounds(forLoop, *newLoop);
-
-  // Push this loop onto stack and traverse body
-  loop_stack_.push(newLoop);
-
-  if (forLoop->getBody()) {
-    TraverseStmt(forLoop->getBody());
-  }
-
-  // After traversing, mark the induction variable
-  markInductionVariable(*newLoop);
-
-  // Run dependency analysis
-  finalizeDependencyAnalysis(*newLoop);
-
-  // Finalize metrics before popping
-  newLoop->finalizeMetrics();
-  loop_stack_.pop();
-  return true;
 }
 
 bool LoopVisitor::VisitWhileStmt(WhileStmt* whileLoop) {
-  if (!whileLoop) {
+    if (!whileLoop) {
+        return true;
+    }
+
+    SourceLocation loc = whileLoop->getWhileLoc();
+    addLoop(whileLoop, loc, "while");
+    LoopInfo* newLoop = &loops_.back();
+    if (!loop_stack_.empty()) {
+        newLoop->setParent(loop_stack_.top());
+    }
+
+    loop_stack_.push(newLoop);
+    if (whileLoop->getBody()) {
+        TraverseStmt(whileLoop->getBody());
+    }
+
+    markInductionVariable(*newLoop);
+    finalizeDependencyAnalysis(*newLoop);
+    newLoop->finalizeMetrics();
+    loop_stack_.pop();
     return true;
-  }
-
-  SourceLocation loc = whileLoop->getWhileLoc();
-  addLoop(whileLoop, loc, "while");
-
-  LoopInfo* newLoop = &loops_.back();
-  if (!loop_stack_.empty()) {
-    newLoop->setParent(loop_stack_.top());
-  }
-
-  loop_stack_.push(newLoop);
-
-  if (whileLoop->getBody()) {
-    TraverseStmt(whileLoop->getBody());
-  }
-
-  markInductionVariable(*newLoop);
-  finalizeDependencyAnalysis(*newLoop);
-  newLoop->finalizeMetrics();
-  loop_stack_.pop();
-  return true;
 }
 
 bool LoopVisitor::VisitDoStmt(DoStmt* doLoop) {
-  if (!doLoop) {
+    if (!doLoop) {
+        return true;
+    }
+
+    SourceLocation loc = doLoop->getDoLoc();
+    addLoop(doLoop, loc, "do-while");
+    LoopInfo* newLoop = &loops_.back();
+    if (!loop_stack_.empty()) {
+        newLoop->setParent(loop_stack_.top());
+    }
+
+    loop_stack_.push(newLoop);
+    if (doLoop->getBody()) {
+        TraverseStmt(doLoop->getBody());
+    }
+
+    markInductionVariable(*newLoop);
+    finalizeDependencyAnalysis(*newLoop);
+    newLoop->finalizeMetrics();
+    loop_stack_.pop();
     return true;
-  }
-
-  SourceLocation loc = doLoop->getDoLoc();
-  addLoop(doLoop, loc, "do-while");
-
-  LoopInfo* newLoop = &loops_.back();
-  if (!loop_stack_.empty()) {
-    newLoop->setParent(loop_stack_.top());
-  }
-
-  loop_stack_.push(newLoop);
-
-  if (doLoop->getBody()) {
-    TraverseStmt(doLoop->getBody());
-  }
-
-  markInductionVariable(*newLoop);
-  finalizeDependencyAnalysis(*newLoop);
-  newLoop->finalizeMetrics();
-  loop_stack_.pop();
-  return true;
 }
 
 bool LoopVisitor::VisitVarDecl(VarDecl* varDecl) {
-  if (!varDecl || !isInsideLoop()) {
+    if (!varDecl || !isInsideLoop()) {
+        return true;
+    }
+
+    const std::string varName = varDecl->getNameAsString();
+    VariableScope scope = determineVariableScope(varDecl);
+    SourceLocation loc = varDecl->getLocation();
+    VariableInfo varInfo(varName, varDecl, scope, loc);
+
+    if (loop_stack_.empty()) {
+        return true;
+    }
+    loop_stack_.top()->addVariable(varInfo);
+
     return true;
-  }
-
-  const std::string varName = varDecl->getNameAsString();
-  VariableScope scope = determineVariableScope(varDecl);
-  SourceLocation loc = varDecl->getLocation();
-
-  VariableInfo varInfo(varName, varDecl, scope, loc);
-  getCurrentLoop()->addVariable(varInfo);
-
-  if (verbose_) {
-    std::cout << "  Found variable declaration: " << varName 
-              << " (scope: " << (scope == VariableScope::LOOP_LOCAL ? "local" : "external")
-              << ")\n";
-  }
-
-  return true;
 }
 
 bool LoopVisitor::VisitDeclRefExpr(DeclRefExpr* declRef) {
-  if (!declRef || !isInsideLoop()) {
+    if (!declRef || !isInsideLoop()) {
+        return true;
+    }
+
+    if (auto* varDecl = dyn_cast<VarDecl>(declRef->getDecl())) {
+        const std::string varName = varDecl->getNameAsString();
+        SourceLocation loc = declRef->getLocation();
+        SourceManager& sm = context_->getSourceManager();
+        unsigned line = sm.getSpellingLineNumber(loc);
+
+        bool isWrite = isWriteAccess(declRef);
+        bool isRead = !isWrite;
+
+        VariableUsage usage(loc, line, isRead, isWrite);
+        
+        if (loop_stack_.empty()) {
+            return true;
+        }
+        LoopInfo* currentLoop = loop_stack_.top();
+        
+        auto it = currentLoop->variables.find(varName);
+        if (it == currentLoop->variables.end()) {
+            VariableScope scope = determineVariableScope(varDecl);
+            VariableInfo varInfo(varName, varDecl, scope, varDecl->getLocation());
+            currentLoop->addVariable(varInfo);
+        }
+        
+        currentLoop->addVariableUsage(varName, usage);
+    }
     return true;
-  }
-
-  if (auto* varDecl = dyn_cast<VarDecl>(declRef->getDecl())) {
-    const std::string varName = varDecl->getNameAsString();
-    SourceLocation loc = declRef->getLocation();
-    SourceManager& sm = context_->getSourceManager();
-    unsigned line = sm.getSpellingLineNumber(loc);
-
-    // Determine if this is a read or write by looking at parent context
-    bool isWrite = isWriteAccess(declRef);
-    bool isRead = !isWrite;
-    
-    VariableUsage usage(loc, line, isRead, isWrite);
-    
-    LoopInfo* currentLoop = getCurrentLoop();
-    auto it = currentLoop->variables.find(varName);
-    if (it == currentLoop->variables.end()) {
-      // Variable not yet tracked, add it
-      VariableScope scope = determineVariableScope(varDecl);
-      VariableInfo varInfo(varName, varDecl, scope, varDecl->getLocation());
-      currentLoop->addVariable(varInfo);
-    }
-    
-    currentLoop->addVariableUsage(varName, usage);
-    
-    // Don't spam output for induction variables, and respect verbose flag
-    if (verbose_ && varName != currentLoop->bounds.iterator_var) {
-      std::cout << "  Variable " << varName << " " 
-                << (isWrite ? "written" : "read") << " at line " << line << "\n";
-    }
-  }
-
-  return true;
 }
 
 bool LoopVisitor::VisitBinaryOperator(BinaryOperator* binOp) {
-  if (!binOp || !isInsideLoop()) {
+    if (!binOp || !isInsideLoop()) {
+        return true;
+    }
+
+    LoopInfo* currentLoop = getCurrentLoop();
+    if (isArithmeticOp(binOp)) {
+        currentLoop->incrementArithmeticOps();
+    } else if (isComparisonOp(binOp)) {
+        currentLoop->incrementComparisons();
+    } else if (binOp->isAssignmentOp()) {
+        currentLoop->incrementAssignments();
+        if (verbose_) {
+            std::cout << "  Assignment operation at line "
+                      << context_->getSourceManager().getSpellingLineNumber(binOp->getOperatorLoc())
+                      << "\n";
+        }
+    }
+
     return true;
-  }
-  
-  LoopInfo* currentLoop = getCurrentLoop();
-  
-  if (isArithmeticOp(binOp)) {
-    currentLoop->incrementArithmeticOps();
-    if (verbose_) {
-      std::cout << "  Arithmetic operation at line " 
-                << context_->getSourceManager().getSpellingLineNumber(binOp->getOperatorLoc()) 
-                << "\n";
-    }
-  } else if (isComparisonOp(binOp)) {
-    currentLoop->incrementComparisons();
-  } else if (binOp->isAssignmentOp()) {
-    currentLoop->incrementAssignments();
-    if (verbose_) {
-      std::cout << "  Assignment operation at line " 
-                << context_->getSourceManager().getSpellingLineNumber(binOp->getOperatorLoc()) 
-                << "\n";
-    }
-  }
-  
-  return true;
 }
 
 bool LoopVisitor::VisitUnaryOperator(UnaryOperator* unaryOp) {
-  if (!unaryOp || !isInsideLoop()) {
+    if (!unaryOp || !isInsideLoop()) {
+        return true;
+    }
+
+    if (unaryOp->isIncrementDecrementOp()) {
+        getCurrentLoop()->incrementArithmeticOps();
+    }
+
     return true;
-  }
-  
-  if (unaryOp->isIncrementDecrementOp()) {
-    getCurrentLoop()->incrementArithmeticOps();
-  }
-  
-  return true;
 }
 
 bool LoopVisitor::VisitCallExpr(CallExpr* callExpr) {
     if (!callExpr || !isInsideLoop()) {
         return true;
     }
-    
+
     LoopInfo* currentLoop = getCurrentLoop();
     currentLoop->incrementFunctionCalls();
-    
+
     if (verbose_) {
-      std::cout << " Function call at line "
-                << context_->getSourceManager().getSpellingLineNumber(callExpr->getBeginLoc())
-                << "\n";
+        std::cout << "  Function call at line "
+                  << context_->getSourceManager().getSpellingLineNumber(callExpr->getBeginLoc())
+                  << "\n";
     }
-    
-    // Analyze the function call and store the result in LoopInfo
+
+    // Analyze function call for safety
     FunctionCallAnalyzer temp_analyzer(context_);
     temp_analyzer.visitCallExpr(callExpr, *currentLoop);
-    
-    // Extract the function name and safety info
+
     std::string func_name;
     if (auto* funcDecl = callExpr->getDirectCallee()) {
         if (funcDecl->getDeclName().isIdentifier()) {
             func_name = funcDecl->getNameAsString();
         }
     }
-    
     if (func_name.empty()) {
         func_name = "unknown_function";
     }
-    
-    // Check if it's safe using the same logic as FunctionCallAnalyzer
+
+    // Check safety using predefined unsafe function list
     bool is_safe = true;
     static const std::set<std::string> unsafe_functions = {
         "printf", "fprintf", "sprintf", "puts", "putchar",
@@ -1468,14 +1429,13 @@ bool LoopVisitor::VisitCallExpr(CallExpr* callExpr) {
         "fopen", "fclose", "fread", "fwrite", "fseek", "ftell",
         "exit", "abort", "system", "rand", "srand", "time"
     };
-    
+
     if (unsafe_functions.find(func_name) != unsafe_functions.end()) {
         is_safe = false;
     }
-    
-    // Store in LoopInfo
+
     currentLoop->addDetectedFunctionCall(func_name, is_safe);
-    
+
     return true;
 }
 
@@ -1483,8 +1443,8 @@ void LoopVisitor::analyzeForLoopBounds(ForStmt* forLoop, LoopInfo& info) {
     info.bounds.init_expr = nullptr;
     info.bounds.condition_expr = forLoop->getCond();
     info.bounds.increment_expr = forLoop->getInc();
-    
-    // Try to extract iterator variable name from initialization
+
+    // Extract iterator variable name
     if (auto* declStmt = dyn_cast_or_null<DeclStmt>(forLoop->getInit())) {
         if (declStmt->isSingleDecl()) {
             if (auto* varDecl = dyn_cast<VarDecl>(declStmt->getSingleDecl())) {
@@ -1492,225 +1452,280 @@ void LoopVisitor::analyzeForLoopBounds(ForStmt* forLoop, LoopInfo& info) {
             }
         }
     }
-    
-    // Check for simple pattern
+
+    // Check for simple loop pattern
     if (!info.bounds.iterator_var.empty() && info.bounds.condition_expr &&
         info.bounds.increment_expr) {
         info.bounds.is_simple_pattern = true;
     }
-    
+
     if (verbose_ && info.bounds.is_simple_pattern) {
-        std::cout << " Simple iterator pattern detected: "
+        std::cout << "  Simple iterator pattern detected: "
                   << info.bounds.iterator_var << " (depth " << info.depth << ")\n";
     }
 }
 
 void LoopVisitor::markInductionVariable(LoopInfo& loop) {
-  // Mark the loop iterator as an induction variable
-  if (!loop.bounds.iterator_var.empty()) {
-    auto it = loop.variables.find(loop.bounds.iterator_var);
-    if (it != loop.variables.end()) {
-      it->second.setRole(VariableRole::INDUCTION_VAR);
-      if (verbose_) {
-        std::cout << "  Marked " << loop.bounds.iterator_var 
-                  << " as induction variable (safe for parallelization)\n";
-      }
+    if (!loop.bounds.iterator_var.empty()) {
+        auto it = loop.variables.find(loop.bounds.iterator_var);
+        if (it != loop.variables.end()) {
+            it->second.setRole(VariableRole::INDUCTION_VAR);
+            if (verbose_) {
+                std::cout << "  Marked " << loop.bounds.iterator_var
+                          << " as induction variable (safe for parallelization)\n";
+            }
+        }
     }
-  }
 }
 
 void LoopVisitor::finalizeDependencyAnalysis(LoopInfo& loop) {
-  // Pass verbose flag to dependency analyzer
-  if (dependency_analyzer_) {
-    dependency_analyzer_->setVerbose(verbose_);
-  }
-  dependency_analyzer_->analyzeDependencies(loop);
-  bool has_deps = dependency_analyzer_->hasDependencies(loop);
-  loop.setHasDependencies(has_deps);
+    if (verbose_) {
+        printArrayAccessSummary();
+    }
+
+    line_access_summaries_.clear();
+
+    if (dependency_analyzer_) {
+        dependency_analyzer_->setVerbose(verbose_);
+    }
+    dependency_analyzer_->analyzeDependencies(loop);
+    bool has_deps = dependency_analyzer_->hasDependencies(loop);
+    loop.setHasDependencies(has_deps);
 }
 
 bool LoopVisitor::VisitArraySubscriptExpr(ArraySubscriptExpr* arrayExpr) {
     if (!arrayExpr || !isInsideLoop()) {
         return true;
     }
-    
+
     const std::string arrayName = extractArrayBaseName(arrayExpr);
     SourceLocation loc = arrayExpr->getExprLoc();
     SourceManager& sm = context_->getSourceManager();
     unsigned line = sm.getSpellingLineNumber(loc);
-    
-    // Determine if this is a write access by checking parent context
+
+    // Check if this is a write by looking at parent context
     bool is_write = false;
     auto parents = context_->getParents(*arrayExpr);
     for (const auto& parent : parents) {
         if (auto* binaryOp = parent.get<BinaryOperator>()) {
-            // Check if this array access is the LHS of an assignment
             if (binaryOp->isAssignmentOp() && binaryOp->getLHS() == arrayExpr) {
                 is_write = true;
                 break;
             }
         }
     }
-    
-    // Create ArrayAccess with proper write/read flag and subscript
+
     ArrayAccess access(arrayName, arrayExpr->getIdx(), loc, line, is_write);
     getCurrentLoop()->addArrayAccess(access);
-    
+
+    // Collect for clean summary output
     if (verbose_) {
-      // Show the actual subscript expression for debugging
-      std::string subscript_str = "unknown";
-      if (arrayExpr->getIdx()) {
-          // Use the same exprToString logic as ArrayDependencyAnalyzer
-          Expr* idx = arrayExpr->getIdx()->IgnoreParenImpCasts();
-          if (auto* declRef = dyn_cast<DeclRefExpr>(idx)) {
-              subscript_str = declRef->getDecl()->getNameAsString();
-          } else if (auto* binOp = dyn_cast<BinaryOperator>(idx)) {
-              // Handle expressions like i-1, i+1
-              if (auto* lhs = dyn_cast<DeclRefExpr>(binOp->getLHS())) {
-                  if (auto* rhs = dyn_cast<IntegerLiteral>(binOp->getRHS())) {
-                      std::string var = lhs->getDecl()->getNameAsString();
-                      int constant = rhs->getValue().getSExtValue();
-                      if (binOp->getOpcode() == BO_Add) {
-                          subscript_str = var + "+" + std::to_string(constant);
-                      } else if (binOp->getOpcode() == BO_Sub) {
-                          subscript_str = var + "-" + std::to_string(constant);
-                      }
-                  }
-              }
-          } else if (auto* intLit = dyn_cast<IntegerLiteral>(idx)) {
-              subscript_str = std::to_string(intLit->getValue().getSExtValue());
-          }
-      }
-      
-      std::cout << " Found array access: " << arrayName << "[" << subscript_str << "] at line " << line
-                << " (" << (is_write ? "WRITE" : "READ") << ")"
-                << " (depth " << getCurrentLoop()->depth << ")\n";
+        std::string subscript_str = extractSubscriptString(arrayExpr->getIdx());
+        std::string access_pattern = arrayName + "[" + subscript_str + "]";
+
+        line_access_summaries_[line].line_number = line;
+        line_access_summaries_[line].accesses.push_back({access_pattern, is_write});
     }
-    
+
     return true;
 }
 
 std::string LoopVisitor::extractArrayBaseName(ArraySubscriptExpr* arrayExpr) {
-  Expr* base = arrayExpr->getBase()->IgnoreParenImpCasts();
+    Expr* base = arrayExpr->getBase()->IgnoreParenImpCasts();
 
-  // For multi-dimensional arrays, traverse down to base
-  while (auto* innerArray = dyn_cast<ArraySubscriptExpr>(base)) {
-    base = innerArray->getBase()->IgnoreParenImpCasts();
-  }
+    // Handle multi-dimensional arrays
+    while (auto* innerArray = dyn_cast<ArraySubscriptExpr>(base)) {
+        base = innerArray->getBase()->IgnoreParenImpCasts();
+    }
 
-  if (auto* declRef = dyn_cast<DeclRefExpr>(base)) {
-    return declRef->getDecl()->getNameAsString();
-  }
+    if (auto* declRef = dyn_cast<DeclRefExpr>(base)) {
+        return declRef->getDecl()->getNameAsString();
+    }
 
-  return "unknown";
+    return "unknown";
+}
+
+std::string LoopVisitor::extractSubscriptString(Expr* idx) {
+    if (!idx) return "unknown";
+
+    idx = idx->IgnoreParenImpCasts();
+
+    if (auto* declRef = dyn_cast<DeclRefExpr>(idx)) {
+        return declRef->getDecl()->getNameAsString();
+    } else if (auto* binOp = dyn_cast<BinaryOperator>(idx)) {
+        if (auto* lhs = dyn_cast<DeclRefExpr>(binOp->getLHS())) {
+            if (auto* rhs = dyn_cast<IntegerLiteral>(binOp->getRHS())) {
+                std::string var = lhs->getDecl()->getNameAsString();
+                int constant = rhs->getValue().getSExtValue();
+                if (binOp->getOpcode() == BO_Add) {
+                    return var + "+" + std::to_string(constant);
+                } else if (binOp->getOpcode() == BO_Sub) {
+                    return var + "-" + std::to_string(constant);
+                }
+            }
+        }
+        return "complex";
+    } else if (auto* intLit = dyn_cast<IntegerLiteral>(idx)) {
+        return std::to_string(intLit->getValue().getSExtValue());
+    }
+
+    return "unknown";
+}
+
+void LoopVisitor::printArrayAccessSummary() {
+    if (!verbose_ || line_access_summaries_.empty()) {
+        return;
+    }
+
+    for (const auto& [line_num, summary] : line_access_summaries_) {
+        std::cout << "  Array accesses: ";
+        for (size_t i = 0; i < summary.accesses.size(); ++i) {
+            if (i > 0) std::cout << ", ";
+            std::cout << summary.accesses[i].first
+                      << " (" << (summary.accesses[i].second ? "WRITE" : "READ") << ")";
+        }
+        std::cout << " at line " << line_num << "\n";
+    }
 }
 
 bool LoopVisitor::isWriteAccess(DeclRefExpr* declRef) {
-  // Look at parent nodes to determine if this is a write access
-  auto parents = context_->getParents(*declRef);
-  
-  for (const auto& parent : parents) {
-    if (auto* binaryOp = parent.get<BinaryOperator>()) {
-      // Check if this declRef is the LHS of an assignment
-      if (binaryOp->isAssignmentOp() && binaryOp->getLHS() == declRef) {
-        return true;
-      }
-    } else if (auto* unaryOp = parent.get<UnaryOperator>()) {
-      // Check for increment/decrement operators
-      if (unaryOp->isIncrementDecrementOp()) {
-        return true;
-      }
-    } else if (auto* compoundAssign = parent.get<CompoundAssignOperator>()) {
-      // +=, -=, *=, etc.
-      if (compoundAssign->getLHS() == declRef) {
-        return true;
-      }
+    auto parents = context_->getParents(*declRef);
+    for (const auto& parent : parents) {
+        if (auto* binaryOp = parent.get<BinaryOperator>()) {
+            if (binaryOp->isAssignmentOp() && binaryOp->getLHS() == declRef) {
+                return true;
+            }
+        } else if (auto* unaryOp = parent.get<UnaryOperator>()) {
+            if (unaryOp->isIncrementDecrementOp()) {
+                return true;
+            }
+        } else if (auto* compoundAssign = parent.get<CompoundAssignOperator>()) {
+            if (compoundAssign->getLHS() == declRef) {
+                return true;
+            }
+        }
     }
-  }
-  
-  return false; // Default to read access
+    return false;
 }
 
 bool LoopVisitor::isArithmeticOp(BinaryOperator* binOp) {
-  return binOp->isAdditiveOp() || binOp->isMultiplicativeOp();
+    return binOp->isAdditiveOp() || binOp->isMultiplicativeOp();
 }
 
 bool LoopVisitor::isComparisonOp(BinaryOperator* binOp) {
-  return binOp->isComparisonOp();
+    return binOp->isComparisonOp();
 }
 
 VariableScope LoopVisitor::determineVariableScope(VarDecl* varDecl) const {
-  // Simple heuristic for now - we can improve this later
-  if (!varDecl) {
-    return VariableScope::GLOBAL;
-  }
-
-  // Check if declared within current loop body (rough approximation)
-  SourceManager& sm = context_->getSourceManager();
-  SourceLocation declLoc = varDecl->getLocation();
-  
-  if (!isInsideLoop()) {
+    if (!varDecl) {
+        return VariableScope::GLOBAL;
+    }
+    
+    SourceLocation declLoc = varDecl->getLocation();
+    if (declLoc.isInvalid()) {
+        return VariableScope::GLOBAL;
+    }
+    
+    // If not analyzing any loop, variable is function-scoped
+    if (loop_stack_.empty()) {
+        return VariableScope::FUNCTION_LOCAL;
+    }
+    
+    // Get current loop from stack (const-safe access)
+    if (loop_stack_.empty()) {
+        return VariableScope::FUNCTION_LOCAL;
+    }
+    LoopInfo* currentLoop = loop_stack_.top();
+    if (!currentLoop || !currentLoop->stmt) {
+        return VariableScope::FUNCTION_LOCAL;
+    }
+    
+    // Get loop boundaries for comparison
+    SourceLocation loopStart = currentLoop->stmt->getBeginLoc();
+    SourceLocation loopEnd = currentLoop->stmt->getEndLoc();
+    
+    if (loopStart.isInvalid() || loopEnd.isInvalid()) {
+        return VariableScope::FUNCTION_LOCAL;
+    }
+    
+    SourceManager& sm = context_->getSourceManager();
+    
+    // Check if variable declared inside loop body
+    if (sm.getFileID(declLoc) == sm.getFileID(loopStart)) {
+        unsigned declOffset = sm.getFileOffset(declLoc);
+        unsigned loopStartOffset = sm.getFileOffset(loopStart);
+        unsigned loopEndOffset = sm.getFileOffset(loopEnd);
+        
+        if (declOffset > loopStartOffset && declOffset < loopEndOffset) {
+            if (verbose_) {
+                std::cout << "  Variable '" << varDecl->getNameAsString() 
+                         << "' declared inside loop body -> LOOP_LOCAL\n";
+            }
+            return VariableScope::LOOP_LOCAL;
+        }
+    }
+    
+    // Handle for-loop induction variables (e.g., "for(int i = 0; ...)")
+    if (auto* forLoop = dyn_cast<ForStmt>(currentLoop->stmt)) {
+        if (auto* declStmt = dyn_cast_or_null<DeclStmt>(forLoop->getInit())) {
+            if (declStmt->isSingleDecl() && declStmt->getSingleDecl() == varDecl) {
+                if (verbose_) {
+                    std::cout << "  Variable '" << varDecl->getNameAsString() 
+                             << "' is for-loop induction variable -> LOOP_LOCAL\n";
+                }
+                return VariableScope::LOOP_LOCAL;
+            }
+        }
+    }
+    
     return VariableScope::FUNCTION_LOCAL;
-  }
-  
-  // For now, assume variables found while traversing loop are loop-local
-  // This is a simplification - real implementation would check scopes more carefully
-  return VariableScope::LOOP_LOCAL;
 }
 
-void LoopVisitor::addLoop(Stmt* stmt, SourceLocation loc,
-                          const std::string& type) {
-  if (!loc.isValid()) {
-    std::cout << "Warning: Invalid source location for " << type << " loop\n";
-    return;
-  }
+void LoopVisitor::addLoop(Stmt* stmt, SourceLocation loc, const std::string& type) {
+    if (!loc.isValid()) {
+        std::cout << "Warning: Invalid source location for " << type << " loop\n";
+        return;
+    }
 
-  SourceManager& sm = context_->getSourceManager();
-  unsigned line = sm.getSpellingLineNumber(loc);
+    SourceManager& sm = context_->getSourceManager();
+    unsigned line = sm.getSpellingLineNumber(loc);
+    loops_.emplace_back(stmt, loc, line, type);
+    unsigned depth = static_cast<unsigned>(loop_stack_.size());
 
-  loops_.emplace_back(stmt, loc, line, type);
-
-  unsigned depth = static_cast<unsigned>(loop_stack_.size());
-  if (verbose_) {
-    std::cout << "Found " << type << " loop at line " << line << " (depth "
-                << depth << ")\n";
-  }
+    if (verbose_) {
+        std::cout << "Found " << type << " loop at line " << line << " (depth "
+                  << depth << ")\n";
+    }
 }
 
 void LoopVisitor::printLoopSummary() const {
     std::cout << "\n=== Analysis Results ===\n";
-    
     if (loops_.empty()) {
         std::cout << "No loops detected in the analyzed code.\n";
         return;
     }
-    
-    // Print table header
+
     std::cout << "Loop   Location    Type     Status          Reason\n";
     std::cout << "----   --------    ----     ------          ------\n";
-    
+
     size_t parallelizable_count = 0;
-    
     for (size_t i = 0; i < loops_.size(); i++) {
         const auto& loop = loops_[i];
-        
-        // Format: L1     line 6      for      PARALLELIZABLE  Simple array operations
+
         std::cout << "L" << (i + 1);
-        
-        // Pad to align columns
         std::cout << "     line " << loop.line_number;
-        if (loop.line_number < 10) std::cout << " ";  // Extra space for single digits
-        
-        std::cout << "     " << loop.loop_type;
-        if (loop.loop_type.length() < 5) std::cout << " ";  // Pad short types
-        
-        // Determine status and reason
+        if (loop.line_number < 10) std::cout << "    ";
+        else if (loop.line_number < 100) std::cout << "   ";
+        else std::cout << "  ";
+
+        std::cout << "  " << loop.loop_type;
+        if (loop.loop_type.length() < 5) std::cout << "  ";
+
+        // Determine status and reasoning
         std::string status, reason;
         if (loop.isParallelizable()) {
             status = "PARALLELIZABLE";
             parallelizable_count++;
-            
-            // Determine why it's safe
             if (loop.bounds.is_simple_pattern && !loop.array_accesses.empty()) {
                 reason = "Simple array operations";
             } else if (loop.bounds.is_simple_pattern) {
@@ -1720,22 +1735,17 @@ void LoopVisitor::printLoopSummary() const {
             }
         } else {
             status = "UNSAFE";
-            
-            // Determine why it's unsafe
             bool has_array_deps = false;
             bool has_function_calls = false;
-            
-            // Check if this loop has unsafe function calls
+
             if (loop.hasUnsafeFunctionCalls()) {
                 has_function_calls = true;
             }
-            
-            // Check if this loop has array dependencies (we'd need to check the actual dependencies)
-            // For now, we'll infer from the other conditions
+
             if (!has_function_calls && loop.has_dependencies) {
                 has_array_deps = true;
             }
-            
+
             if (has_function_calls && has_array_deps) {
                 reason = "Function calls + dependencies";
             } else if (has_function_calls) {
@@ -1746,19 +1756,15 @@ void LoopVisitor::printLoopSummary() const {
                 reason = "Complex dependencies";
             }
         }
-        
-        std::cout << "     " << status;
-        
-        // Pad status column
+
+        std::cout << "  " << status;
         for (int pad = status.length(); pad < 15; pad++) {
             std::cout << " ";
         }
-        
         std::cout << " " << reason << "\n";
     }
-    
-    // Summary line
-    std::cout << "\nParallelizable: " << parallelizable_count << "/" << loops_.size() 
+
+    std::cout << "\nParallelizable: " << parallelizable_count << "/" << loops_.size()
               << " loops (" << (loops_.size() > 0 ? (parallelizable_count * 100 / loops_.size()) : 0) << "%)\n";
 }
 
@@ -1779,9 +1785,6 @@ void PointerAnalyzer::analyzePointerUsage(LoopInfo& loop) {
     std::cout << "  Analyzing pointer usage in loop at line " 
              << loop.line_number << "\n";
   }
-  
-  // The actual pointer detection happens through the visitor methods
-  // called from LoopVisitor and this method summarizes the results
   
   PointerRisk risk = getPointerRisk(loop);
   
@@ -1805,12 +1808,11 @@ PointerRisk PointerAnalyzer::getPointerRisk(const LoopInfo& loop) const {
     return PointerRisk::SAFE;
   }
   
-  // Check for complex patterns that are definitely unsafe
   if (hasComplexPointerArithmetic() || hasMultiplePointerDereferences()) {
     return PointerRisk::UNSAFE;
   }
   
-  // Any pointer dereferences are potentially risky due to aliasing
+  // Any dereferencing is risky due to potential aliasing
   for (const auto& op : pointer_ops_) {
     if (op.is_dereference) {
       return PointerRisk::POTENTIAL_ALIAS;
@@ -1830,7 +1832,7 @@ void PointerAnalyzer::visitUnaryOperator(UnaryOperator* unaryOp, LoopInfo& loop)
   unsigned line = sm.getSpellingLineNumber(loc);
   
   switch (unaryOp->getOpcode()) {
-    case UO_Deref: { // *ptr
+    case UO_Deref: {
       std::string ptrName = extractPointerName(unaryOp->getSubExpr());
       if (!ptrName.empty()) {
         recordPointerOperation(ptrName, loc, true, false, false);
@@ -1841,7 +1843,7 @@ void PointerAnalyzer::visitUnaryOperator(UnaryOperator* unaryOp, LoopInfo& loop)
       }
       break;
     }
-    case UO_AddrOf: { // &var
+    case UO_AddrOf: {
       std::string varName = extractPointerName(unaryOp->getSubExpr());
       if (!varName.empty()) {
         recordPointerOperation(varName, loc, false, true, false);
@@ -1856,7 +1858,6 @@ void PointerAnalyzer::visitUnaryOperator(UnaryOperator* unaryOp, LoopInfo& loop)
     case UO_PostInc:
     case UO_PreDec:
     case UO_PostDec: {
-      // Check if incrementing/decrementing a pointer
       if (isPointerType(unaryOp->getSubExpr()->getType())) {
         std::string ptrName = extractPointerName(unaryOp->getSubExpr());
         if (!ptrName.empty()) {
@@ -1879,12 +1880,10 @@ void PointerAnalyzer::visitBinaryOperator(BinaryOperator* binOp, LoopInfo& loop)
     return;
   }
   
-  // Check for pointer arithmetic: ptr + offset, ptr - offset
   Expr* lhs = binOp->getLHS();
   Expr* rhs = binOp->getRHS();
   
   if (binOp->getOpcode() == BO_Add || binOp->getOpcode() == BO_Sub) {
-    // Check if left operand is a pointer
     if (isPointerType(lhs->getType())) {
       std::string ptrName = extractPointerName(lhs);
       if (!ptrName.empty()) {
@@ -1901,7 +1900,7 @@ void PointerAnalyzer::visitBinaryOperator(BinaryOperator* binOp, LoopInfo& loop)
     }
   }
   
-  // Check for pointer assignments that might create aliasing
+  // Check for pointer assignments that create aliasing
   if (binOp->isAssignmentOp()) {
     if (isPointerType(lhs->getType()) && isPointerType(rhs->getType())) {
       std::string lhsName = extractPointerName(lhs);
@@ -1926,8 +1925,7 @@ void PointerAnalyzer::visitMemberExpr(MemberExpr* memberExpr, LoopInfo& loop) {
     return;
   }
   
-  // Check for struct/class member access through pointers
-  if (memberExpr->isArrow()) { // ptr->member
+  if (memberExpr->isArrow()) {
     std::string ptrName = extractPointerName(memberExpr->getBase());
     if (!ptrName.empty()) {
       SourceLocation loc = memberExpr->getMemberLoc();
@@ -1952,7 +1950,6 @@ std::string PointerAnalyzer::extractPointerName(Expr* expr) {
     return "";
   }
   
-  // Use instance method with recursion limit to prevent infinite loops
   return extractPointerNameRecursive(expr, 0);
 }
 
@@ -1973,7 +1970,6 @@ std::string PointerAnalyzer::extractPointerNameRecursive(Expr* expr, int depth) 
   } else if (auto* arrayExpr = dyn_cast<ArraySubscriptExpr>(expr)) {
     return extractPointerNameRecursive(arrayExpr->getBase(), depth + 1);
   } else if (auto* binOp = dyn_cast<BinaryOperator>(expr)) {
-    // Handle pointer arithmetic like ptr + offset
     if (binOp->getOpcode() == BO_Add || binOp->getOpcode() == BO_Sub) {
       std::string lhs = extractPointerNameRecursive(binOp->getLHS(), depth + 1);
       if (!lhs.empty() && lhs != "complex_expr") {
@@ -1985,7 +1981,6 @@ std::string PointerAnalyzer::extractPointerNameRecursive(Expr* expr, int depth) 
       return "complex_expr";
     }
   } else if (auto* unaryOp = dyn_cast<UnaryOperator>(expr)) {
-    // Handle unary operations like *ptr, &var
     return extractPointerNameRecursive(unaryOp->getSubExpr(), depth + 1);
   } else {
     return "complex_expr";
@@ -2010,7 +2005,6 @@ bool PointerAnalyzer::hasComplexPointerArithmetic() const {
     }
   }
   
-  // More than 2 pointer arithmetic operations is getting complex
   return arithmetic_ops > 2;
 }
 
@@ -2022,7 +2016,6 @@ bool PointerAnalyzer::hasMultiplePointerDereferences() const {
     }
   }
   
-  // Multiple pointer dereferences suggest complex data structures
   return dereference_count > 3;
 }
 
@@ -2035,7 +2028,9 @@ namespace statik {
 void PragmaGenerator::generatePragmasForLoops(const std::vector<LoopInfo>& loops) {
   generated_pragmas_.clear();
   
-  std::cout << "\n=== Generating OpenMP Pragmas ===\n";
+  if (verbose_) {
+    std::cout << "\n=== Generating OpenMP Pragmas ===\n";
+  }
   
   for (const auto& loop : loops) {
     PragmaType pragma_type = determinePragmaType(loop);
@@ -2047,12 +2042,11 @@ void PragmaGenerator::generatePragmasForLoops(const std::vector<LoopInfo>& loops
       GeneratedPragma pragma(pragma_type, pragma_text, loop.loop_type, 
                            loop.line_number, reasoning);
       
-      // Check if we need private variable clauses
+      // Add private variables if needed
       std::vector<std::string> private_vars = identifyPrivateVariables(loop);
       if (!private_vars.empty()) {
         pragma.requires_private_vars = true;
         pragma.private_variables = private_vars;
-        // Add private clause to pragma text
         pragma.pragma_text += " private(";
         for (size_t i = 0; i < private_vars.size(); i++) {
           if (i > 0) pragma.pragma_text += ", ";
@@ -2061,11 +2055,10 @@ void PragmaGenerator::generatePragmasForLoops(const std::vector<LoopInfo>& loops
         pragma.pragma_text += ")";
       }
       
-      // Calculate confidence score BEFORE adding to vector
+      // Calculate confidence score
       if (confidence_scorer_) {
         pragma.confidence = confidence_scorer_->calculateConfidence(loop, pragma);
       } else {
-        // Fallback if confidence scorer is not initialized
         pragma.confidence.numerical_score = 0.5;
         pragma.confidence.level = ConfidenceLevel::MEDIUM;
         pragma.confidence.reasoning = "Confidence scorer not available";
@@ -2073,47 +2066,50 @@ void PragmaGenerator::generatePragmasForLoops(const std::vector<LoopInfo>& loops
       
       generated_pragmas_.push_back(pragma);
       
-      std::cout << "  Generated pragma for " << loop.loop_type 
-               << " loop at line " << loop.line_number << ":\n";
-      std::cout << "    " << pragma.pragma_text << "\n";
-      std::cout << "    Reasoning: " << reasoning << "\n";
-      
-      if (confidence_scorer_) {
-        std::cout << "    Confidence: " << confidence_scorer_->getConfidenceDescription(pragma.confidence.level)
-                 << " (" << static_cast<int>(pragma.confidence.numerical_score * 100) << "%)\n";
-        std::cout << "    " << pragma.confidence.reasoning << "\n";
+      if (verbose_) {
+        std::cout << "\n  Generated pragma for " << loop.loop_type 
+                 << " loop at line " << loop.line_number << ":\n";
+        std::cout << "    " << pragma.pragma_text << "\n";
+        std::cout << "\n  Reasoning: \n" << "      " + reasoning << "\n";
+        
+        if (confidence_scorer_) {
+          std::cout << "\n  Confidence: " << confidence_scorer_->getConfidenceDescription(pragma.confidence.level)
+                   << " (" << static_cast<int>(pragma.confidence.numerical_score * 100) << "%)\n";
+          std::cout << "    " << pragma.confidence.reasoning << "\n";
+        }
       }
     } else {
-      std::cout << "  No pragma generated for " << loop.loop_type 
-               << " loop at line " << loop.line_number 
-               << " (has dependencies)\n";
+      if (verbose_) {
+        std::cout << "  No pragma generated for " << loop.loop_type 
+                 << " loop at line " << loop.line_number 
+                 << " (has dependencies)\n";
+      }
+    }
+
+    if (verbose_) {
+      std::cout << "======================================================\n";
     }
   }
-  
-  std::cout << "===============================\n";
 }
 
 PragmaType PragmaGenerator::determinePragmaType(const LoopInfo& loop) {
-  // Only generate pragmas for parallelizable loops
   if (loop.has_dependencies) {
     return PragmaType::NO_PRAGMA;
   }
   
-  // For nested loops, be more conservative
+  // Be conservative with nested loops
   if (loop.depth > 0) {
-    // Inner loops with simple array access might benefit from SIMD
     if (shouldUseSimd(loop)) {
       return PragmaType::SIMD;
     }
-    return PragmaType::NO_PRAGMA;  // Conservative for nested loops
+    return PragmaType::NO_PRAGMA;
   }
   
-  // For outermost loops, check if SIMD is beneficial
+  // For outermost loops, consider SIMD + parallelization
   if (shouldUseSimd(loop)) {
     return PragmaType::PARALLEL_FOR_SIMD;
   }
   
-  // Default to parallel for
   return PragmaType::PARALLEL_FOR;
 }
 
@@ -2150,35 +2146,31 @@ std::string PragmaGenerator::generateReasoning(PragmaType type, const LoopInfo& 
       break;
   }
   
-  // Add specific details about why this loop is good for parallelization
-  if (type != PragmaType::NO_PRAGMA) {
-    if (loop.bounds.is_simple_pattern) {
-      reason += " (simple iterator pattern)";
-    }
-    if (loop.isHot()) {
-      reason += " (high computational intensity)";
-    }
-  }
+  // // Add extra details if available
+  // if (type != PragmaType::NO_PRAGMA) {
+  //   if (loop.bounds.is_simple_pattern) {
+  //     reason += "\n     - simple iterator pattern)";
+  //   }
+  //   if (loop.isHot()) {
+  //     reason += "\n     - high computational intensity)";
+  //   }
+  // }
   
   return reason;
 }
 
 bool PragmaGenerator::shouldUseSimd(const LoopInfo& loop) {
-  // SIMD is beneficial for loops with:
-  // 1. Simple array access patterns
-  // 2. Arithmetic operations
-  // 3. No function calls (or only math functions)
-  
+  // SIMD works best with simple array access + arithmetic
   if (!hasSimpleArrayAccess(loop)) {
     return false;
   }
   
-  // Check if loop has primarily arithmetic operations
+  // Prefer arithmetic-heavy loops
   if (loop.metrics.arithmetic_ops > loop.metrics.function_calls * 2) {
     return true;
   }
   
-  // For inner loops, be more aggressive with SIMD
+  // Inner loops with memory access are good SIMD candidates
   if (isInnerLoop(loop) && loop.metrics.memory_accesses > 0) {
     return true;
   }
@@ -2187,19 +2179,16 @@ bool PragmaGenerator::shouldUseSimd(const LoopInfo& loop) {
 }
 
 bool PragmaGenerator::hasSimpleArrayAccess(const LoopInfo& loop) {
-  // Check if array accesses use simple patterns like A[i], B[i]
+  // TODO: Actually analyze subscript expressions for complexity
   for (const auto& access : loop.array_accesses) {
-    // For now, assume most array accesses in parallelizable loops are simple
-    // A more sophisticated check would analyze the subscript expressions
+    // Placeholder - should check if indices are simple patterns
   }
   
-  // If we have array accesses and the loop is parallelizable, 
-  // assume they're simple enough
+  // If loop is parallelizable and has array access, assume it's simple enough
   return !loop.array_accesses.empty();
 }
 
 bool PragmaGenerator::isInnerLoop(const LoopInfo& loop) {
-  // An inner loop has children but is not at depth 0
   return loop.depth > 0;
 }
 
@@ -2209,13 +2198,12 @@ std::vector<std::string> PragmaGenerator::identifyPrivateVariables(const LoopInf
   for (const auto& var_pair : loop.variables) {
     const auto& var = var_pair.second;
     
-    // Skip induction variables - they're automatically private
+    // Skip induction variables (automatically private in OpenMP)
     if (var.isInductionVariable()) {
       continue;
     }
     
-    // Variables that are only written or declared inside the loop
-    // should be private
+    // Loop-local variables that are written should be private
     if (var.scope == VariableScope::LOOP_LOCAL && var.hasWrites()) {
       private_vars.push_back(var.name);
     }
@@ -2225,6 +2213,9 @@ std::vector<std::string> PragmaGenerator::identifyPrivateVariables(const LoopInf
 }
 
 void PragmaGenerator::printPragmaSummary() const {
+
+  if (!verbose_) return;
+
   std::cout << "\n=== Pragma Generation Summary ===\n";
   std::cout << "Total pragmas generated: " << generated_pragmas_.size() << "\n\n";
   
@@ -2285,10 +2276,9 @@ using namespace clang;
 namespace statik {
 
 void PragmaLocationMapper::mapLoopToPragmaLocation(const LoopInfo& loop) {
-  std::cout << "  Mapping pragma insertion point for " << loop.loop_type 
-           << " loop at line " << loop.line_number << "\n";
+  // std::cout << "  Mapping pragma insertion point for " << loop.loop_type 
+  //          << " loop at line " << loop.line_number << "\n";
   
-  // Find the best location to insert the pragma (usually before the loop)
   SourceLocation pragma_loc = findPragmaInsertionLocation(loop.stmt);
   
   if (pragma_loc.isInvalid()) {
@@ -2296,13 +2286,12 @@ void PragmaLocationMapper::mapLoopToPragmaLocation(const LoopInfo& loop) {
     return;
   }
   
-  // Skip loops in macro expansions - too risky to modify
+  // Skip macro expansions
   if (isLocationInMacro(pragma_loc)) {
     std::cout << "  Skipping loop in macro expansion\n";
     return;
   }
   
-  // Get both spelling and expansion line numbers for comparison
   unsigned spelling_line = source_manager_->getSpellingLineNumber(pragma_loc);
   unsigned expansion_line = source_manager_->getExpansionLineNumber(pragma_loc);
   
@@ -2311,7 +2300,6 @@ void PragmaLocationMapper::mapLoopToPragmaLocation(const LoopInfo& loop) {
              << spelling_line << ", expansion: " << expansion_line << ")\n";
   }
   
-  // Use spelling line number for accurate source location
   unsigned line = spelling_line;
   unsigned col = getColumnNumber(pragma_loc);
   
@@ -2320,11 +2308,11 @@ void PragmaLocationMapper::mapLoopToPragmaLocation(const LoopInfo& loop) {
   
   insertion_points_.push_back(point);
   
-  std::cout << "  Pragma insertion point: line " << line << ", column " << col;
-  if (loop.depth > 0) {
-    std::cout << " (nested depth " << loop.depth << ")";
-  }
-  std::cout << "\n";
+  // std::cout << "  Pragma insertion point: line " << line << ", column " << col;
+  // if (loop.depth > 0) {
+  //   std::cout << " (nested depth " << loop.depth << ")";
+  // }
+  // std::cout << "\n";
 }
 
 SourceLocation PragmaLocationMapper::findPragmaInsertionLocation(Stmt* loop_stmt) {
@@ -2337,9 +2325,8 @@ SourceLocation PragmaLocationMapper::findPragmaInsertionLocation(Stmt* loop_stmt
     return SourceLocation();
   }
   
-  // Handle macro expansions and preprocessor issues
+  // Handle macro expansions
   if (loop_start.isMacroID()) {
-    // Get the spelling location (where the text actually appears)
     loop_start = source_manager_->getSpellingLoc(loop_start);
     
     if (loop_start.isInvalid()) {
@@ -2348,20 +2335,16 @@ SourceLocation PragmaLocationMapper::findPragmaInsertionLocation(Stmt* loop_stmt
     }
   }
   
-  // Try to move to the beginning of the line containing the loop
   SourceLocation line_start = moveToStartOfLine(loop_start);
   
-  // Check if there are preprocessor directives on the line before
-  // If so, we need to insert after them
+  // TODO: Check for preprocessor directives on previous line
   unsigned line_num = source_manager_->getSpellingLineNumber(line_start);
   if (line_num > 1) {
-    // Check the previous line for preprocessor directives
     SourceLocation prev_line = source_manager_->translateLineCol(
         source_manager_->getFileID(line_start), line_num - 1, 1);
     
     if (prev_line.isValid()) {
-      // For now, use the current line start
-      // A more sophisticated approach would parse preprocessor directives
+      // For now just use current line - could improve this
       return line_start;
     }
   }
@@ -2382,7 +2365,6 @@ bool PragmaLocationMapper::isLocationInMacro(SourceLocation loc) {
     return false;
   }
   
-  // Check if this location is from a macro expansion
   return loc.isMacroID();
 }
 
@@ -2391,14 +2373,11 @@ std::string PragmaLocationMapper::getIndentationAtLocation(SourceLocation loc) {
     return "";
   }
   
-  // Get the line start and read characters until we hit non-whitespace
   SourceLocation line_start = moveToStartOfLine(loc);
   
-  // This is a simplified approach - a real implementation would
-  // read the source file and analyze the actual indentation
-  
-  // For now, return a reasonable default indentation
-  return "    "; // 4 spaces
+  // TODO: Actually read the source file to get real indentation
+  // For now just return reasonable default
+  return "    ";
 }
 
 SourceLocation PragmaLocationMapper::moveToStartOfLine(SourceLocation loc) {
@@ -2406,12 +2385,10 @@ SourceLocation PragmaLocationMapper::moveToStartOfLine(SourceLocation loc) {
     return loc;
   }
   
-  // For now, we'll use the given location as a reasonable approximation
-  // In practice, Clang's Lexer class has better methods for this
+  // Could use Clang's Lexer class for better line handling
   unsigned line = source_manager_->getSpellingLineNumber(loc);
   FileID file_id = source_manager_->getFileID(loc);
   
-  // Try to get location at column 1 of the same line
   SourceLocation line_start = source_manager_->translateLineCol(file_id, line, 1);
   
   return line_start.isValid() ? line_start : loc;
@@ -2471,19 +2448,19 @@ bool SourceAnnotator::writeAnnotatedFile(const std::string& output_filename) {
 }
 
 void SourceAnnotator::printAnnotationSummary() const {
-  std::cout << "\n=== Annotation Summary ===\n";
+  // std::cout << "\n=== Annotation Summary ===\n";
   
-  int pragma_count = 0;
-  for (const auto& line : annotated_lines_) {
-    if (line.has_pragma) {
-      pragma_count++;
-      std::cout << "Line " << line.line_number << ": " 
-               << line.pragma_annotation << "\n";
-    }
-  }
+  // int pragma_count = 0;
+  // for (const auto& line : annotated_lines_) {
+  //   if (line.has_pragma) {
+  //     pragma_count++;
+  //     std::cout << "Line " << line.line_number << ": " 
+  //              << line.pragma_annotation << "\n";
+  //   }
+  // }
   
-  std::cout << "Total pragmas inserted: " << pragma_count << "\n";
-  std::cout << "=========================\n";
+  // std::cout << "Total pragmas inserted: " << pragma_count << "\n";
+  // std::cout << "=========================\n";
 }
 
 bool SourceAnnotator::readSourceFile(const std::string& filename) {
@@ -2617,7 +2594,6 @@ public:
           input_filename_(input), verbose_(verbose) {}
     
     bool BeginSourceFileAction(CompilerInstance& compiler) override {
-        // Suppress compilation diagnostics
         DiagnosticsEngine &diags = compiler.getDiagnostics();
         diags.setSuppressAllDiagnostics(true);
         
@@ -2630,9 +2606,14 @@ public:
         
         if (generate_pragmas_) {
             consumer->enablePragmaGeneration(output_filename_, input_filename_);
+            // For pragma mode only show detailed pragma info if verbose
+            consumer->setVerbose(false);  
+            consumer->setPragmaVerbose(verbose_); 
+        } else {
+            // For analysis mode: show detailed analysis if verbose
+            consumer->setVerbose(verbose_);
+            consumer->setPragmaVerbose(false);
         }
-        
-        consumer->setVerbose(verbose_);
         
         return consumer;
     }
@@ -2701,10 +2682,14 @@ int main(int argc, char** argv) {
         std::cout << "Input: " << input_file << "\n";
         std::cout << "Output: " << output_filename << "\n";
     } else {
-        std::cout << "Mode: Analysis only\n";
+        if (verbose_mode) {
+            std::cout << "Mode: Analysis only\n";
+        }
     }
     
-    std::cout << "Analyzing: " << input_file << "\n";
+    if (verbose_mode) {  
+        std::cout << "Analyzing: " << input_file << "\n";
+    }
 
     // Read source file
     std::ifstream file(input_file);

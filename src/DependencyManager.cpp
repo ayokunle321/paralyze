@@ -24,42 +24,45 @@ DependencyManager::DependencyManager(ASTContext* context)
 }
 
 void DependencyManager::analyzeLoop(LoopInfo& loop) {
-  warnings_.clear();
-  
-  if (verbose_) {
-    std::cout << "\n\n=== Dependency Analysis for Loop at Line " << loop.line_number << " ===\n";
-  }
-  
-  try {
-    runScalarAnalysis(loop);
-    runArrayAnalysis(loop);
-    runPointerAnalysis(loop);
-    runFunctionAnalysis(loop);
-    
-    // Set final parallelization decision
-    bool is_safe = isLoopParallelizable(loop);
-    loop.setHasDependencies(!is_safe);
+    warnings_.clear();
     
     if (verbose_) {
-      std::cout << "\n--- Final Decision ---\n";
-      if (is_safe) {
-        std::cout << "Loop is SAFE for parallelization\n";
-      } else {
-        std::cout << "Loop is UNSAFE for parallelization\n";
-        if (!warnings_.empty()) {
-          std::cout << "Reasons:\n";
-          for (const auto& warning : warnings_) {
-            std::cout << "  - " << warning << "\n";
-          }
-        }
-      }
-      std::cout << "======================================================\n\n";
+        std::cout << "\n=== Dependency Analysis for Loop at Line " << loop.line_number << " ===\n";
     }
-    
-  } catch (const std::exception& e) {
-    recordWarning("Analysis failed with exception: " + std::string(e.what()));
-    loop.setHasDependencies(true);  // Conservative fallback
-  }
+
+    try {
+        runScalarAnalysis(loop);
+        runArrayAnalysis(loop);
+        runPointerAnalysis(loop);
+        runFunctionAnalysis(loop);
+
+        // Set final parallelization decision
+        bool is_safe = isLoopParallelizable(loop);
+        loop.setHasDependencies(!is_safe);
+
+        if (verbose_) {
+            std::cout << "\n--- Final Decision ---\n";
+            if (is_safe) {
+                std::cout << "Loop is SAFE for parallelization\n";
+            } else {
+                std::cout << "Loop is UNSAFE for parallelization\n";
+                if (!warnings_.empty()) {
+                    std::cout << "Blocking factors:\n";
+                    for (const auto& warning : warnings_) {
+                        std::cout << "  • " << warning << "\n";
+                    }
+                }
+            }
+            std::cout << "======================================================\n";
+        }
+    } catch (const std::exception& e) {
+        recordWarning("Analysis failed with exception: " + std::string(e.what()));
+        loop.setHasDependencies(true); // Conservative fallback
+        
+        if (verbose_) {
+            std::cout << "Analysis failed: " << e.what() << "\n";
+        }
+    }
 }
 
 bool DependencyManager::isLoopParallelizable(const LoopInfo& loop) const {
@@ -71,123 +74,147 @@ bool DependencyManager::isLoopParallelizable(const LoopInfo& loop) const {
 }
 
 void DependencyManager::runScalarAnalysis(LoopInfo& loop) {
-  if (verbose_) {
-    std::cout << "\n--- Scalar Variable Analysis ---\n";
-  }
-  
-  bool found_scalar_deps = false;
-  
-  for (const auto& var_pair : loop.variables) {
-    const auto& var = var_pair.second;
-    
-    // Skip induction variables as OpenMP handles them automatically
-    if (var.isInductionVariable()) {
-      if (verbose_) {
-        std::cout << "  " << var.name << ": INDUCTION VARIABLE (safe)\n";
-      }
-      continue;
+    if (verbose_) {
+        std::cout << "\n--- Scalar Variable Analysis ---\n";
     }
     
-    // Check for read-after-write dependencies
-    if (var.hasReads() && var.hasWrites()) {
-      if (var.scope == VariableScope::LOOP_LOCAL) {
-        // Loop-local variables are safe as each iteration gets its own copy
-        if (verbose_) {
-          std::cout << "  " << var.name << ": LOCAL VARIABLE (safe)\n";
+    bool found_scalar_deps = false;
+    
+    for (const auto& var_pair : loop.variables) {
+        const auto& var = var_pair.second;
+
+        // Skip induction variables as OpenMP handles them automatically
+        if (var.isInductionVariable()) {
+            if (verbose_) {
+                std::cout << "  " << var.name << ": INDUCTION VARIABLE (safe)\n";
+            }
+            continue;
         }
-      } else {
-        // Function/global scope variables with read+write are unsafe
-        if (verbose_) {
-          std::cout << "  " << var.name << ": READ+WRITE dependency detected\n";
+
+        // Check for read-after-write dependencies
+        if (var.hasReads() && var.hasWrites()) {
+            if (var.scope == VariableScope::LOOP_LOCAL) {
+                if (verbose_) {
+                    std::cout << "  " << var.name << ": LOCAL VARIABLE (safe)\n";
+                }
+            } else {
+                if (verbose_) {
+                    std::cout << "  " << var.name << ": READ+WRITE dependency (unsafe)\n";
+                }
+                recordWarning("Scalar variable '" + var.name + "' has read-after-write dependency");
+                found_scalar_deps = true;
+            }
+        } else if (var.hasWrites()) {
+            if (verbose_) {
+                std::cout << "  " << var.name << ": WRITE-ONLY (safe)\n";
+            }
+        } else if (var.hasReads()) {
+            if (verbose_) {
+                std::cout << "  " << var.name << ": READ-ONLY (safe)\n";
+            }
         }
-        recordWarning("Scalar variable '" + var.name + "' has read-after-write dependency");
-        found_scalar_deps = true;
-      }
-    } else if (var.hasWrites()) {
-      if (verbose_) {
-        std::cout << "  " << var.name << ": WRITE-ONLY (safe)\n";
-      }
-    } else if (var.hasReads()) {
-      if (verbose_) {
-        std::cout << "  " << var.name << ": READ-ONLY (safe)\n";
-      }
     }
-  }
-  
-  if (verbose_ && !found_scalar_deps) {
-    std::cout << "  No scalar dependencies detected\n";
-  }
+
+    if (verbose_ && !found_scalar_deps) {
+        std::cout << "  No scalar dependencies detected\n";
+    }
 }
 
 void DependencyManager::runArrayAnalysis(LoopInfo& loop) {
-  if (verbose_) {
-    std::cout << "\n--- Array Dependency Analysis ---\n";
-  }
-  
-  try {
-    array_analyzer_->setVerbose(verbose_);
-    array_analyzer_->analyzeArrayDependencies(loop);
-    
-    if (array_analyzer_->hasArrayDependencies(loop)) {
-      recordWarning("Array access conflicts detected");
+    if (verbose_) {
+        std::cout << "\n--- Array Dependency Analysis ---\n";
     }
-  } catch (...) {
-    recordWarning("Array analysis failed - assuming unsafe");
-  }
-}
 
-void DependencyManager::runPointerAnalysis(LoopInfo& loop) {
-  if (verbose_) {
-    std::cout << "\n--- Pointer Analysis ---\n";
-  }
-  
-  try {
-    pointer_analyzer_->setVerbose(verbose_);
-    pointer_analyzer_->analyzePointerUsage(loop);
-    
-    PointerRisk risk = pointer_analyzer_->getPointerRisk(loop);
-    switch (risk) {
-      case PointerRisk::POTENTIAL_ALIAS:
-        recordWarning("Potential pointer aliasing detected");
-        break;
-      case PointerRisk::UNSAFE:
-        recordWarning("Complex pointer operations detected");
-        break;
-      case PointerRisk::SAFE:
-        // No warning needed
-        break;
+    try {
+        array_analyzer_->setVerbose(verbose_);
+        array_analyzer_->analyzeArrayDependencies(loop);
+        
+        if (array_analyzer_->hasArrayDependencies(loop)) {
+            recordWarning("Array access conflicts detected");
+            if (verbose_) {
+                std::cout << "  Array dependencies found\n";
+            }
+        } else if (verbose_) {
+            std::cout << "  No array dependencies detected\n";
+        }
+    } catch (...) {
+        recordWarning("Array analysis failed - assuming unsafe");
+        if (verbose_) {
+            std::cout << "  Array analysis failed\n";
+        }
     }
-  } catch (...) {
-    recordWarning("Pointer analysis failed - assuming unsafe");
-  }
+}
+void DependencyManager::runPointerAnalysis(LoopInfo& loop) {
+    if (verbose_) {
+        std::cout << "\n--- Pointer Analysis ---\n";
+    }
+
+    try {
+        pointer_analyzer_->setVerbose(verbose_);
+        pointer_analyzer_->analyzePointerUsage(loop);
+        PointerRisk risk = pointer_analyzer_->getPointerRisk(loop);
+        
+        switch (risk) {
+            case PointerRisk::POTENTIAL_ALIAS:
+                recordWarning("Potential pointer aliasing detected");
+                if (verbose_) {
+                    std::cout << "  Potential pointer aliasing\n";
+                }
+                break;
+            case PointerRisk::UNSAFE:
+                recordWarning("Complex pointer operations detected");
+                if (verbose_) {
+                    std::cout << "  Complex pointer operations\n";
+                }
+                break;
+            case PointerRisk::SAFE:
+                if (verbose_) {
+                    std::cout << "  No risky pointer operations\n";
+                }
+                break;
+        }
+    } catch (...) {
+        recordWarning("Pointer analysis failed - assuming unsafe");
+        if (verbose_) {
+            std::cout << "  Pointer analysis failed\n";
+        }
+    }
 }
 
 void DependencyManager::runFunctionAnalysis(LoopInfo& loop) {
-  if (verbose_) {
-    std::cout << "\n--- Function Call Analysis ---\n";
-  }
-  
-  try {
-    function_analyzer_->setVerbose(verbose_);
-    function_analyzer_->analyzeFunctionCalls(loop);
-    
-    FunctionCallSafety safety = function_analyzer_->getFunctionCallSafety(loop);
-    switch (safety) {
-      case FunctionCallSafety::UNSAFE:
-        recordWarning("Function calls with side effects detected");
-        break;
-      case FunctionCallSafety::POTENTIALLY_SAFE:
-        if (verbose_) {
-          std::cout << "  Math functions detected (potentially safe)\n";
-        }
-        break;
-      case FunctionCallSafety::SAFE:
-        // No warning needed
-        break;
+    if (verbose_) {
+        std::cout << "\n--- Function Call Analysis ---\n";
     }
-  } catch (...) {
-    recordWarning("Function analysis failed - assuming unsafe");
-  }
+
+    try {
+        function_analyzer_->setVerbose(verbose_);
+        function_analyzer_->analyzeFunctionCalls(loop);
+        FunctionCallSafety safety = function_analyzer_->getFunctionCallSafety(loop);
+        
+        switch (safety) {
+            case FunctionCallSafety::UNSAFE:
+                recordWarning("Function calls with side effects detected");
+                if (verbose_) {
+                    std::cout << "  Functions with side effects found\n";
+                }
+                break;
+            case FunctionCallSafety::POTENTIALLY_SAFE:
+                if (verbose_) {
+                    std::cout << "  Math functions detected (potentially safe)\n";
+                }
+                break;
+            case FunctionCallSafety::SAFE:
+                if (verbose_) {
+                    std::cout << "  No problematic function calls\n";
+                }
+                break;
+        }
+    } catch (...) {
+        recordWarning("Function analysis failed - assuming unsafe");
+        if (verbose_) {
+            std::cout << "  Function analysis failed\n";
+        }
+    }
 }
 
 void DependencyManager::recordWarning(const std::string& warning) {

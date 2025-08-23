@@ -8,8 +8,8 @@ using namespace clang;
 namespace statik {
 
 void PragmaLocationMapper::mapLoopToPragmaLocation(const LoopInfo& loop) {
-  std::cout << "  Mapping pragma insertion point for " << loop.loop_type 
-           << " loop at line " << loop.line_number << "\n";
+  // std::cout << "  Mapping pragma insertion point for " << loop.loop_type 
+  //          << " loop at line " << loop.line_number << "\n";
   
   SourceLocation pragma_loc = findPragmaInsertionLocation(loop.stmt);
   
@@ -40,11 +40,11 @@ void PragmaLocationMapper::mapLoopToPragmaLocation(const LoopInfo& loop) {
   
   insertion_points_.push_back(point);
   
-  std::cout << "  Pragma insertion point: line " << line << ", column " << col;
-  if (loop.depth > 0) {
-    std::cout << " (nested depth " << loop.depth << ")";
-  }
-  std::cout << "\n";
+  // std::cout << "  Pragma insertion point: line " << line << ", column " << col;
+  // if (loop.depth > 0) {
+  //   std::cout << " (nested depth " << loop.depth << ")";
+  // }
+  // std::cout << "\n";
 }
 
 SourceLocation PragmaLocationMapper::findPragmaInsertionLocation(Stmt* loop_stmt) {

@@ -52,19 +52,19 @@ bool SourceAnnotator::writeAnnotatedFile(const std::string& output_filename) {
 }
 
 void SourceAnnotator::printAnnotationSummary() const {
-  std::cout << "\n=== Annotation Summary ===\n";
+  // std::cout << "\n=== Annotation Summary ===\n";
   
-  int pragma_count = 0;
-  for (const auto& line : annotated_lines_) {
-    if (line.has_pragma) {
-      pragma_count++;
-      std::cout << "Line " << line.line_number << ": " 
-               << line.pragma_annotation << "\n";
-    }
-  }
+  // int pragma_count = 0;
+  // for (const auto& line : annotated_lines_) {
+  //   if (line.has_pragma) {
+  //     pragma_count++;
+  //     std::cout << "Line " << line.line_number << ": " 
+  //              << line.pragma_annotation << "\n";
+  //   }
+  // }
   
-  std::cout << "Total pragmas inserted: " << pragma_count << "\n";
-  std::cout << "=========================\n";
+  // std::cout << "Total pragmas inserted: " << pragma_count << "\n";
+  // std::cout << "=========================\n";
 }
 
 bool SourceAnnotator::readSourceFile(const std::string& filename) {

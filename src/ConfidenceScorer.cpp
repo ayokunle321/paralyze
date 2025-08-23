@@ -3,6 +3,7 @@
 #include "analyzer/PragmaGenerator.h"
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 
 namespace statik {
 
@@ -196,25 +197,20 @@ std::string ConfidenceScorer::getConfidenceDescription(ConfidenceLevel level) co
 std::string ConfidenceScorer::generateReasoning(const LoopInfo& loop, const GeneratedPragma& pragma,
                                                const std::vector<std::string>& pos_factors,
                                                const std::vector<std::string>& neg_factors) {
-  std::string reasoning = "Confidence based on: ";
-  
+  std::string reasoning = "\n  Confidence based on:\n";
   if (!pos_factors.empty()) {
-    reasoning += "Positive factors: ";
-    for (size_t i = 0; i < pos_factors.size(); i++) {
-      if (i > 0) reasoning += ", ";
-      reasoning += pos_factors[i];
-    }
+      reasoning += "\n    Positive factors:\n";
+      for (const auto& factor : pos_factors) {
+          reasoning += "      - " + factor + "\n";
+      }
   }
-  
+
   if (!neg_factors.empty()) {
-    if (!pos_factors.empty()) reasoning += ". ";
-    reasoning += "Negative factors: ";
-    for (size_t i = 0; i < neg_factors.size(); i++) {
-      if (i > 0) reasoning += ", ";
-      reasoning += neg_factors[i];
-    }
+      reasoning += "\n    Negative factors:\n";
+      for (const auto& factor : neg_factors) {
+          reasoning += "      - " + factor + "\n";
+      }
   }
-  
   return reasoning;
 }
 

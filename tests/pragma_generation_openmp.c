@@ -5,6 +5,7 @@
 void test_simple_parallel() {
     int a[1000], b[1000], c[1000];
     
+    #pragma omp parallel for simd
     for (int i = 0; i < 1000; i++) {
         c[i] = a[i] + b[i];  
     }
@@ -15,6 +16,7 @@ void test_simd_candidate() {
     double data[500];
     double results[500];
     
+    #pragma omp parallel for
     for (int j = 0; j < 500; j++) {
         results[j] = data[j] * data[j] + sin(data[j]);  // Arithmetic + math function
     }
