@@ -4,83 +4,93 @@
 #include "clang/AST/ParentMapContext.h"
 #include "analyzer/FunctionCallAnalyzer.h"
 #include <iostream>
+#include <iomanip> 
 
 using namespace clang;
 
 namespace statik {
 
 bool LoopVisitor::VisitForStmt(ForStmt* forLoop) {
-    if (!forLoop) {
-        return true;
-    }
-
+    if (!forLoop) return true;
+    
     SourceLocation loc = forLoop->getForLoc();
     addLoop(forLoop, loc, "for");
-
-    LoopInfo* newLoop = &loops_.back();
+    
+    size_t currentIndex = loops_.size() - 1;
+    
     if (!loop_stack_.empty()) {
-        newLoop->setParent(loop_stack_.top());
+        size_t parentIndex = loop_stack_.top();
+        loops_[currentIndex].setParent(parentIndex, loops_[parentIndex].depth);
+        loops_[parentIndex].addChildLoop(currentIndex);
     }
-
-    analyzeForLoopBounds(forLoop, *newLoop);
-
-    // Process the loop body
-    loop_stack_.push(newLoop);
+    
+    analyzeForLoopBounds(forLoop, loops_[currentIndex]);
+    loop_stack_.push(currentIndex);
+    
     if (forLoop->getBody()) {
         TraverseStmt(forLoop->getBody());
     }
-
-    markInductionVariable(*newLoop);
-    finalizeDependencyAnalysis(*newLoop);
-    newLoop->finalizeMetrics();
+    
+    markInductionVariable(loops_[currentIndex]);
+    finalizeDependencyAnalysis(loops_[currentIndex]);
+    loops_[currentIndex].finalizeMetrics();
+    
     loop_stack_.pop();
     return true;
 }
 
 bool LoopVisitor::VisitWhileStmt(WhileStmt* whileLoop) {
-    if (!whileLoop) {
-        return true;
-    }
+    if (!whileLoop) return true;
 
     SourceLocation loc = whileLoop->getWhileLoc();
     addLoop(whileLoop, loc, "while");
-    LoopInfo* newLoop = &loops_.back();
+    
+    size_t currentIndex = loops_.size() - 1;
+    
     if (!loop_stack_.empty()) {
-        newLoop->setParent(loop_stack_.top());
+        size_t parentIndex = loop_stack_.top();
+        loops_[currentIndex].setParent(parentIndex, loops_[parentIndex].depth);
+        loops_[parentIndex].addChildLoop(currentIndex);
     }
 
-    loop_stack_.push(newLoop);
+    loop_stack_.push(currentIndex);
+    
     if (whileLoop->getBody()) {
         TraverseStmt(whileLoop->getBody());
     }
 
-    markInductionVariable(*newLoop);
-    finalizeDependencyAnalysis(*newLoop);
-    newLoop->finalizeMetrics();
+    markInductionVariable(loops_[currentIndex]);
+    finalizeDependencyAnalysis(loops_[currentIndex]);
+    loops_[currentIndex].finalizeMetrics();
+    
     loop_stack_.pop();
     return true;
 }
 
 bool LoopVisitor::VisitDoStmt(DoStmt* doLoop) {
-    if (!doLoop) {
-        return true;
-    }
+    if (!doLoop) return true;
 
     SourceLocation loc = doLoop->getDoLoc();
     addLoop(doLoop, loc, "do-while");
-    LoopInfo* newLoop = &loops_.back();
+    
+    size_t currentIndex = loops_.size() - 1;
+    
     if (!loop_stack_.empty()) {
-        newLoop->setParent(loop_stack_.top());
+        size_t parentIndex = loop_stack_.top();
+        loops_[currentIndex].setParent(parentIndex, loops_[parentIndex].depth);
+        loops_[parentIndex].addChildLoop(currentIndex);
     }
 
-    loop_stack_.push(newLoop);
+    loop_stack_.push(currentIndex);
+    
     if (doLoop->getBody()) {
         TraverseStmt(doLoop->getBody());
     }
 
-    markInductionVariable(*newLoop);
-    finalizeDependencyAnalysis(*newLoop);
-    newLoop->finalizeMetrics();
+    markInductionVariable(loops_[currentIndex]);
+    finalizeDependencyAnalysis(loops_[currentIndex]);
+    loops_[currentIndex].finalizeMetrics();
+    
     loop_stack_.pop();
     return true;
 }
@@ -98,10 +108,15 @@ bool LoopVisitor::VisitVarDecl(VarDecl* varDecl) {
     if (loop_stack_.empty()) {
         return true;
     }
-    loop_stack_.top()->addVariable(varInfo);
+    
+    LoopInfo* currentLoop = getCurrentLoop();
+    if (currentLoop) {
+        currentLoop->addVariable(varInfo);
+    }
 
     return true;
 }
+
 
 bool LoopVisitor::VisitDeclRefExpr(DeclRefExpr* declRef) {
     if (!declRef || !isInsideLoop()) {
@@ -119,10 +134,10 @@ bool LoopVisitor::VisitDeclRefExpr(DeclRefExpr* declRef) {
 
         VariableUsage usage(loc, line, isRead, isWrite);
         
-        if (loop_stack_.empty()) {
+        LoopInfo* currentLoop = getCurrentLoop();
+        if (!currentLoop) {
             return true;
         }
-        LoopInfo* currentLoop = loop_stack_.top();
         
         auto it = currentLoop->variables.find(varName);
         if (it == currentLoop->variables.end()) {
@@ -404,23 +419,20 @@ VariableScope LoopVisitor::determineVariableScope(VarDecl* varDecl) const {
         return VariableScope::GLOBAL;
     }
     
-    // If not analyzing any loop, variable is function-scoped
     if (loop_stack_.empty()) {
         return VariableScope::FUNCTION_LOCAL;
     }
     
-    // Get current loop from stack (const-safe access)
-    if (loop_stack_.empty()) {
-        return VariableScope::FUNCTION_LOCAL;
-    }
-    LoopInfo* currentLoop = loop_stack_.top();
-    if (!currentLoop || !currentLoop->stmt) {
+    // Get current loop index and dereference safely
+    size_t currentIndex = loop_stack_.top();
+    const LoopInfo& currentLoop = loops_[currentIndex];
+    
+    if (!currentLoop.stmt) {
         return VariableScope::FUNCTION_LOCAL;
     }
     
-    // Get loop boundaries for comparison
-    SourceLocation loopStart = currentLoop->stmt->getBeginLoc();
-    SourceLocation loopEnd = currentLoop->stmt->getEndLoc();
+    SourceLocation loopStart = currentLoop.stmt->getBeginLoc();
+    SourceLocation loopEnd = currentLoop.stmt->getEndLoc();
     
     if (loopStart.isInvalid() || loopEnd.isInvalid()) {
         return VariableScope::FUNCTION_LOCAL;
@@ -428,7 +440,6 @@ VariableScope LoopVisitor::determineVariableScope(VarDecl* varDecl) const {
     
     SourceManager& sm = context_->getSourceManager();
     
-    // Check if variable declared inside loop body
     if (sm.getFileID(declLoc) == sm.getFileID(loopStart)) {
         unsigned declOffset = sm.getFileOffset(declLoc);
         unsigned loopStartOffset = sm.getFileOffset(loopStart);
@@ -443,8 +454,7 @@ VariableScope LoopVisitor::determineVariableScope(VarDecl* varDecl) const {
         }
     }
     
-    // Handle for-loop induction variables (e.g., "for(int i = 0; ...)")
-    if (auto* forLoop = dyn_cast<ForStmt>(currentLoop->stmt)) {
+    if (auto* forLoop = dyn_cast<ForStmt>(currentLoop.stmt)) {
         if (auto* declStmt = dyn_cast_or_null<DeclStmt>(forLoop->getInit())) {
             if (declStmt->isSingleDecl() && declStmt->getSingleDecl() == varDecl) {
                 if (verbose_) {

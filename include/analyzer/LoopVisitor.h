@@ -38,13 +38,22 @@ private:
     clang::ASTContext* context_;
     DependencyAnalyzer* dependency_analyzer_;
     std::vector<LoopInfo> loops_;
-    std::stack<LoopInfo*> loop_stack_;
+    std::stack<size_t> loop_stack_;     
+    
+    LoopInfo* getCurrentLoop() {
+        if (loop_stack_.empty()) return nullptr;
+        return &loops_[loop_stack_.top()];
+    }
+    
+    const LoopInfo* getCurrentLoop() const {
+        if (loop_stack_.empty()) return nullptr;
+        return &loops_[loop_stack_.top()];
+    }
+    
     bool verbose_;
     std::map<unsigned, LineArrayAccesses> line_access_summaries_;
 
     bool isInsideLoop() const { return !loop_stack_.empty(); }
-    LoopInfo* getCurrentLoop() { return loop_stack_.empty() ? nullptr : loop_stack_.top(); }
-
     void addLoop(clang::Stmt* stmt, clang::SourceLocation loc, const std::string& type);
     void analyzeForLoopBounds(clang::ForStmt* forLoop, LoopInfo& info);
     void markInductionVariable(LoopInfo& loop);

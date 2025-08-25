@@ -1,3 +1,7 @@
+#include <stdio.h>   // printf
+#include <stdlib.h>  // malloc, free, rand
+#include <math.h>    // sin, cos
+
 // Simple loop - safe
 void test_simple_safe() {
     int a[100], b[100], c[100];

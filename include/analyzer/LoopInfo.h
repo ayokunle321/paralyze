@@ -8,6 +8,7 @@
 #include "analyzer/LoopMetrics.h"
 #include <vector>
 #include <map>
+#include <optional>
 
 namespace statik {
 
@@ -17,10 +18,10 @@ struct LoopInfo {
     unsigned line_number;
     std::string loop_type; // "for", "while", "do-while"
     
-    // Nesting information
+    // Nesting information - NOW USING INDICES INSTEAD OF POINTERS
     unsigned depth; // 0 = outermost, 1 = nested once, etc.
-    LoopInfo* parent_loop; // nullptr if outermost
-    std::vector<LoopInfo*> child_loops;
+    std::optional<size_t> parent_loop_index; // Index into loops_ vector, nullopt if outermost
+    std::vector<size_t> child_loop_indices; // Indices of child loops
     
     // Array access patterns within this loop
     std::vector<ArrayAccess> array_accesses;
@@ -44,19 +45,20 @@ struct LoopInfo {
     LoopInfo(clang::Stmt* s, clang::SourceLocation loc, unsigned line,
              const std::string& type)
         : stmt(s), location(loc), line_number(line), loop_type(type), depth(0),
-          parent_loop(nullptr), has_dependencies(false) {}
+          parent_loop_index(std::nullopt), has_dependencies(false) {}
           
     void addArrayAccess(const ArrayAccess& access) {
         array_accesses.push_back(access);
         metrics.memory_accesses++; // Count array access as memory operation
     }
     
-    void setParent(LoopInfo* parent) {
-        parent_loop = parent;
-        if (parent) {
-            depth = parent->depth + 1;
-            parent->child_loops.push_back(this);
-        }
+    void setParent(size_t parent_index, unsigned parent_depth) {
+        parent_loop_index = parent_index;
+        depth = parent_depth + 1;
+    }
+    
+    void addChildLoop(size_t child_index) {
+        child_loop_indices.push_back(child_index);
     }
     
     void addVariable(const VariableInfo& var_info) {
@@ -101,6 +103,8 @@ struct LoopInfo {
     bool isOutermost() const { return depth == 0; }
     bool isHot() const { return metrics.hotness_score > 10.0; }
     bool isParallelizable() const { return !has_dependencies; }
+    
+    bool hasParent() const { return parent_loop_index.has_value(); }
 };
 
 } // namespace statik

@@ -1,6 +1,3 @@
-// tests/scalar_dependencies.c
-// Testing scalar variable dependencies
-
 #include <stdio.h>
 
 // Basic dependency - should be unsafe

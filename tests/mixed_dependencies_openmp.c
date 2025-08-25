@@ -1,3 +1,7 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>   
+
 // Simple loop - safe
 void test_simple_safe() {
     int a[100], b[100], c[100];
