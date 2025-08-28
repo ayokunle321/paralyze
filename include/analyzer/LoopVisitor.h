@@ -20,9 +20,9 @@ public:
     explicit LoopVisitor(clang::ASTContext* context, DependencyAnalyzer* analyzer)
         : context_(context), dependency_analyzer_(analyzer), verbose_(false) {}
 
-    bool VisitForStmt(clang::ForStmt* forLoop);
-    bool VisitWhileStmt(clang::WhileStmt* whileLoop);
-    bool VisitDoStmt(clang::DoStmt* doLoop);
+    bool TraverseForStmt(clang::ForStmt* forLoop);
+    bool TraverseWhileStmt(clang::WhileStmt* whileLoop);
+    bool TraverseDoStmt(clang::DoStmt* doLoop);
     bool VisitVarDecl(clang::VarDecl* varDecl);
     bool VisitDeclRefExpr(clang::DeclRefExpr* declRef);
     bool VisitBinaryOperator(clang::BinaryOperator* binOp);
@@ -49,7 +49,7 @@ private:
         if (loop_stack_.empty()) return nullptr;
         return &loops_[loop_stack_.top()];
     }
-    
+
     bool verbose_;
     std::map<unsigned, LineArrayAccesses> line_access_summaries_;
 
