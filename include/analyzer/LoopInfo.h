@@ -100,6 +100,25 @@ struct LoopInfo {
         return false;
     }
     
+    // Recursively check if this loop or any child loops have unsafe function calls
+    bool hasUnsafeCallsRecursive(const std::vector<LoopInfo>& all_loops) const {
+        // Check this loop's own function calls
+        if (hasUnsafeFunctionCalls()) {
+            return true;
+        }
+        
+        // Check all child loops recursively
+        for (size_t child_idx : child_loop_indices) {
+            if (child_idx < all_loops.size()) {
+                if (all_loops[child_idx].hasUnsafeCallsRecursive(all_loops)) {
+                    return true;
+                }
+            }
+        }
+        
+        return false;
+    }
+    
     bool isOutermost() const { return depth == 0; }
     bool isHot() const { return metrics.hotness_score > 10.0; }
     bool isParallelizable() const { return !has_dependencies; }

@@ -302,15 +302,25 @@ void LoopVisitor::finalizeDependencyAnalysis(LoopInfo& loop) {
     if (verbose_) {
         printArrayAccessSummary();
     }
-
+    
     line_access_summaries_.clear();
-
+    
     if (dependency_analyzer_) {
         dependency_analyzer_->setVerbose(verbose_);
     }
+    
     dependency_analyzer_->analyzeDependencies(loop);
+    
+    // Combine both checks
     bool has_deps = dependency_analyzer_->hasDependencies(loop);
-    loop.setHasDependencies(has_deps);
+    bool has_unsafe_nested = loop.hasUnsafeCallsRecursive(loops_);
+    
+    if (has_unsafe_nested && verbose_) {
+        std::cout << "  Note: Nested loop contains unsafe function calls\n";
+    }
+    
+    // Mark as having dependencies if either condition is true
+    loop.setHasDependencies(has_deps || has_unsafe_nested);
 }
 
 bool LoopVisitor::VisitArraySubscriptExpr(ArraySubscriptExpr* arrayExpr) {
