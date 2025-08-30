@@ -63,6 +63,9 @@ private:
     std::string extractSubscriptString(clang::Expr* idx);
     void printArrayAccessSummary();
 
+    std::string extractPointerBaseName(clang::Expr* expr);
+    bool isWriteAccessUnary(clang::UnaryOperator* unaryOp);
+
     bool isWriteAccess(clang::DeclRefExpr* declRef);
     bool isArithmeticOp(clang::BinaryOperator* binOp);
     bool isComparisonOp(clang::BinaryOperator* binOp);
