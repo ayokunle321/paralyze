@@ -195,6 +195,37 @@ bool LoopVisitor::VisitUnaryOperator(UnaryOperator* unaryOp) {
         getCurrentLoop()->incrementArithmeticOps();
     }
 
+    // Detect pointer dereferences that represent array accesses
+    if (unaryOp->getOpcode() == UO_Deref) {
+        Expr* subExpr = unaryOp->getSubExpr()->IgnoreParenImpCasts();
+        
+        // Check if dereferencing something with addition (pointer arithmetic)
+        if (auto* binOp = dyn_cast<BinaryOperator>(subExpr)) {
+            if (binOp->getOpcode() == BO_Add) {
+                // Extract the base pointer name
+                std::string baseName = extractPointerBaseName(binOp->getLHS());
+                
+                if (!baseName.empty() && baseName != "complex_expr") {
+                    SourceLocation loc = unaryOp->getExprLoc();
+                    SourceManager& sm = context_->getSourceManager();
+                    unsigned line = sm.getSpellingLineNumber(loc);
+                    
+                    bool is_write = isWriteAccessUnary(unaryOp);
+                    
+                    // Create array access with the offset expression
+                    ArrayAccess access(baseName, binOp->getRHS(), loc, line, is_write);
+                    getCurrentLoop()->addArrayAccess(access);
+                    
+                    if (verbose_) {
+                        std::string access_pattern = baseName + "[offset]";
+                        line_access_summaries_[line].line_number = line;
+                        line_access_summaries_[line].accesses.push_back({access_pattern, is_write});
+                    }
+                }
+            }
+        }
+    }
+
     return true;
 }
 
@@ -250,7 +281,7 @@ void LoopVisitor::analyzeForLoopBounds(ForStmt* forLoop, LoopInfo& info) {
     info.bounds.condition_expr = forLoop->getCond();
     info.bounds.increment_expr = forLoop->getInc();
 
-    // Extract iterator variable name - handle both declaration and assignment
+    // Extract iterator variable name and handle both declaration and assignment
     if (forLoop->getInit()) {
         // Case 1: Variable declared in init (for (int i = 0; ...))
         if (auto* declStmt = dyn_cast<DeclStmt>(forLoop->getInit())) {
@@ -373,6 +404,40 @@ std::string LoopVisitor::extractArrayBaseName(ArraySubscriptExpr* arrayExpr) {
     }
 
     return "unknown";
+}
+
+std::string LoopVisitor::extractPointerBaseName(Expr* expr) {
+    if (!expr) return "";
+    
+    expr = expr->IgnoreParenImpCasts();
+    
+    if (auto* declRef = dyn_cast<DeclRefExpr>(expr)) {
+        return declRef->getDecl()->getNameAsString();
+    }
+    
+    // Handle cases like (tmp + offset) where we want "tmp"
+    if (auto* binOp = dyn_cast<BinaryOperator>(expr)) {
+        return extractPointerBaseName(binOp->getLHS());
+    }
+    
+    return "complex_expr";
+}
+
+bool LoopVisitor::isWriteAccessUnary(UnaryOperator* unaryOp) {
+    auto parents = context_->getParents(*unaryOp);
+    for (const auto& parent : parents) {
+        if (auto* binOp = parent.get<BinaryOperator>()) {
+            if (binOp->isAssignmentOp() && binOp->getLHS() == unaryOp) {
+                return true;
+            }
+        }
+        if (auto* compoundAssign = parent.get<CompoundAssignOperator>()) {
+            if (compoundAssign->getLHS() == unaryOp) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 std::string LoopVisitor::extractSubscriptString(Expr* idx) {
