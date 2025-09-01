@@ -7,5 +7,4 @@ BreakBeforeBraces: Allman
 PointerAlignment: Left
 ReflowComments: false
 AllowShortFunctionsOnASingleLine: Inline
-AllowShortNamespacesOnASingleLine: false
 SpaceBeforeParens: ControlStatements
