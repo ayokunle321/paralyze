@@ -36,7 +36,7 @@ void DependencyManager::analyzeLoop(LoopInfo& loop) {
         runPointerAnalysis(loop);
         runFunctionAnalysis(loop);
 
-        // Set final parallelization decision
+        //set final parallelization decision
         bool is_safe = isLoopParallelizable(loop);
         loop.setHasDependencies(!is_safe);
 
@@ -57,7 +57,7 @@ void DependencyManager::analyzeLoop(LoopInfo& loop) {
         }
     } catch (const std::exception& e) {
         recordWarning("Analysis failed with exception: " + std::string(e.what()));
-        loop.setHasDependencies(true); // Conservative fallback
+        loop.setHasDependencies(true); // conservative fallback
         
         if (verbose_) {
             std::cout << "Analysis failed: " << e.what() << "\n";
@@ -66,7 +66,7 @@ void DependencyManager::analyzeLoop(LoopInfo& loop) {
 }
 
 bool DependencyManager::isLoopParallelizable(const LoopInfo& loop) const {
-  // A loop is parallelizable if it has no dependencies from any analyzer
+  // loop is parallelizable if it has no dependencies from any analyzer
   return !hasScalarDependencies(loop) &&
          !array_analyzer_->hasArrayDependencies(loop) &&
          (pointer_analyzer_->getPointerRisk(loop) == PointerRisk::SAFE) &&
@@ -83,7 +83,7 @@ void DependencyManager::runScalarAnalysis(LoopInfo& loop) {
     for (const auto& var_pair : loop.variables) {
         const auto& var = var_pair.second;
 
-        // Skip induction variables as OpenMP handles them automatically
+        // skip induction variables as OpenMP handles them automatically
         if (var.isInductionVariable()) {
             if (verbose_) {
                 std::cout << "  " << var.name << ": INDUCTION VARIABLE (safe)\n";
@@ -91,7 +91,7 @@ void DependencyManager::runScalarAnalysis(LoopInfo& loop) {
             continue;
         }
 
-        // Check for read-after-write dependencies
+        // check for read-after-write dependencies
         if (var.hasReads() && var.hasWrites()) {
             if (var.scope == VariableScope::LOOP_LOCAL) {
                 if (verbose_) {
@@ -243,7 +243,7 @@ void DependencyManager::mapPragmaLocations(const std::vector<LoopInfo>& loops) {
   std::cout << "\n=== Mapping Pragma Insertion Points ===\n";
   
   for (const auto& loop : loops) {
-    // Only map locations for parallelizable loops
+    // only map locations for parallelizable loops
     if (isLoopParallelizable(loop)) {
       location_mapper_->mapLoopToPragmaLocation(loop);
     } else {

@@ -10,18 +10,20 @@
 
 namespace statik {
 
+// kinds of conflicts between array accesses across iterations
 enum class IterationConflictType {
   NO_CONFLICT,
   WRITE_AFTER_READ,
   READ_AFTER_WRITE,
   WRITE_AFTER_WRITE,
-  STRIDE_CONFLICT       // Non-unit stride or complex indexing
+  STRIDE_CONFLICT       // non-unit stride or complex indexing
 };
 
+// record of a single cross-iteration conflict
 struct CrossIterationConflict {
   std::string array_name;
   IterationConflictType type;
-  std::string index_pattern;
+  std::string index_pattern;  
   unsigned source_line;
   unsigned sink_line;
   std::string description;
@@ -33,6 +35,7 @@ struct CrossIterationConflict {
         source_line(src_line), sink_line(sink_line), description(desc) {}
 };
 
+// analyzes loops for cross-iteration array conflicts
 class CrossIterationAnalyzer {
 public:
   explicit CrossIterationAnalyzer(clang::ASTContext* context) : context_(context) {}

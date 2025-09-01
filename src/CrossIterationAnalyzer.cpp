@@ -16,13 +16,13 @@ void CrossIterationAnalyzer::analyzeCrossIterationConflicts(LoopInfo& loop) {
              << loop.line_number << "\n";
   }
   
-  // Group array accesses by array name
+  // group array accesses by array name
   std::map<std::string, std::vector<ArrayAccess>> arrays_map;
   for (const auto& access : loop.array_accesses) {
     arrays_map[access.array_name].push_back(access);
   }
   
-  // Analyze each array separately
+  // analyze each array separately
   for (const auto& array_pair : arrays_map) {
     const std::string& array_name = array_pair.first;
     const std::vector<ArrayAccess>& accesses = array_pair.second;
@@ -53,30 +53,30 @@ void CrossIterationAnalyzer::analyzeArrayAccessPattern(const std::string& array_
     std::cout << "  Analyzing " << accesses.size() << " accesses to array " << array_name << "\n";
   }
   
-  // Check every pair of accesses for potential conflicts
+  // check every pair of accesses for potential conflicts
   for (size_t i = 0; i < accesses.size(); i++) {
     for (size_t j = i + 1; j < accesses.size(); j++) {
       const ArrayAccess& access1 = accesses[i];
       const ArrayAccess& access2 = accesses[j];
       
-      // Skip if both are reads - no conflict
+      // skip if both are reads - no conflict
       if (!access1.is_write && !access2.is_write) {
         continue;
       }
       
-      // Analyze the index expressions to detect stride patterns
+      // analyze the index expressions to detect stride patterns
       int offset1 = 0, offset2 = 0;
       bool has_offset1 = hasOffsetFromInduction(access1.subscript, induction_var, offset1);
       bool has_offset2 = hasOffsetFromInduction(access2.subscript, induction_var, offset2);
       
       if (has_offset1 && has_offset2) {
-        // Both use induction variable with offsets - check for conflicts
-        int stride = 1; // Assume unit stride for now
+        // both use induction variable with offsets - check for conflicts
+        int stride = 1; // assume unit stride for now
         IterationConflictType conflict_type = classifyConflict(access1, access2, 
                                                              offset1, offset2, stride);
         
         if (conflict_type != IterationConflictType::NO_CONFLICT) {
-          // Format the pattern correctly
+          // format the pattern correctly
           std::string pattern1 = induction_var;
           std::string pattern2 = induction_var;
           
@@ -104,7 +104,7 @@ void CrossIterationAnalyzer::analyzeArrayAccessPattern(const std::string& array_
           }
         }
       } else if (!has_offset1 || !has_offset2) {
-        // One or both indices are complex - conservative assumption
+        // one or both indices are complex - conservative
         std::string pattern = "complex_indices";
         std::string desc = describeConflict(IterationConflictType::STRIDE_CONFLICT, 
                                           array_name, pattern);
@@ -130,7 +130,7 @@ bool CrossIterationAnalyzer::hasOffsetFromInduction(Expr* index,
   
   index = index->IgnoreParenImpCasts();
   
-  // Case 1: Simple induction variable (i) -> offset = 0
+  // case 1: simple induction variable
   if (auto* declRef = dyn_cast<DeclRefExpr>(index)) {
     if (declRef->getDecl()->getNameAsString() == induction_var) {
       offset = 0;
@@ -138,13 +138,13 @@ bool CrossIterationAnalyzer::hasOffsetFromInduction(Expr* index,
     }
   }
   
-  // Case 2: Induction variable with constant offset (i+1, i-1)
+  // case 2: induction variable with constant offset
   if (auto* binOp = dyn_cast<BinaryOperator>(index)) {
     if (binOp->getOpcode() == BO_Add || binOp->getOpcode() == BO_Sub) {
       Expr* lhs = binOp->getLHS()->IgnoreParenImpCasts();
       Expr* rhs = binOp->getRHS()->IgnoreParenImpCasts();
       
-      // Check if LHS is induction variable and RHS is constant
+      // check if LHS is induction variable and RHS is constant
       if (auto* lhsRef = dyn_cast<DeclRefExpr>(lhs)) {
         if (lhsRef->getDecl()->getNameAsString() == induction_var) {
           if (auto* rhsLit = dyn_cast<IntegerLiteral>(rhs)) {
@@ -155,7 +155,7 @@ bool CrossIterationAnalyzer::hasOffsetFromInduction(Expr* index,
         }
       }
       
-      // Check if RHS is induction variable and LHS is constant (rare but possible)
+      // check if RHS is induction variable and LHS is constant (rare but possible)
       if (auto* rhsRef = dyn_cast<DeclRefExpr>(rhs)) {
         if (rhsRef->getDecl()->getNameAsString() == induction_var && 
             binOp->getOpcode() == BO_Add) {
@@ -175,12 +175,12 @@ IterationConflictType CrossIterationAnalyzer::classifyConflict(const ArrayAccess
                                                              const ArrayAccess& access2,
                                                              int offset1, int offset2, 
                                                              int stride) {
-  // If offsets are the same, different iterations access same element
+  // if offsets are the same, different iterations access same element
   if (offset1 == offset2) {
     if (access1.is_write && access2.is_write) {
       return IterationConflictType::WRITE_AFTER_WRITE;
     } else if (access1.is_write || access2.is_write) {
-      // One write, one read
+      // one write, one read
       if (access1.line_number < access2.line_number) {
         return access1.is_write ? IterationConflictType::READ_AFTER_WRITE 
                                : IterationConflictType::WRITE_AFTER_READ;
@@ -191,10 +191,10 @@ IterationConflictType CrossIterationAnalyzer::classifyConflict(const ArrayAccess
     }
   }
   
-  // Check if offset difference matches stride (potential loop-carried dependency)
+  // check if offset difference matches stride
   int offset_diff = std::abs(offset1 - offset2);
   if (offset_diff == stride) {
-    // Adjacent iterations accessing related elements
+    // adjacent iterations accessing related elements
     if (access1.is_write || access2.is_write) {
       return IterationConflictType::WRITE_AFTER_READ;  // Conservative
     }
@@ -230,7 +230,7 @@ std::string CrossIterationAnalyzer::describeConflict(IterationConflictType type,
 }
 
 bool CrossIterationAnalyzer::detectsStridePattern(Expr* index, const std::string& induction_var, int& stride) {
-  // Simplified implementation - assume unit stride for now
+  // assume unit stride for now
   stride = 1;
   return true;
 }

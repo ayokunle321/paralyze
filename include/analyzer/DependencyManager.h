@@ -14,36 +14,28 @@
 
 namespace statik {
 
-// Central manager for all dependency analysis components
+// central manager coordinating all dependency analysis components
 class DependencyManager {
 public:
     explicit DependencyManager(clang::ASTContext* context);
     
-    void analyzeLoop(LoopInfo& loop);
+    void analyzeLoop(LoopInfo& loop);            
     bool isLoopParallelizable(const LoopInfo& loop) const;
-    
-    // Add verbose control
     void setVerbose(bool verbose) { verbose_ = verbose; }
-    
-    // Pragma location mapping
     void mapPragmaLocations(const std::vector<LoopInfo>& loops);
-    
-    // Pragma generation
     void generatePragmas(const std::vector<LoopInfo>& loops);
-    
-    // Source annotation with pragmas
     void annotateSourceFile(const std::string& input_filename,
                            const std::string& output_filename);
     
-    // Get detailed analysis results
+    // access analysis warnings
     const std::vector<std::string>& getAnalysisWarnings() const { return warnings_; }
     void clearWarnings() { warnings_.clear(); }
     
 private:
     clang::ASTContext* context_;
-    bool verbose_ = false;  // Add verbose flag
+    bool verbose_ = false;  
     
-    // Specialized analyzers
+    // specialized analyzers
     std::unique_ptr<ArrayDependencyAnalyzer> array_analyzer_;
     std::unique_ptr<PointerAnalyzer> pointer_analyzer_;
     std::unique_ptr<FunctionCallAnalyzer> function_analyzer_;
@@ -51,10 +43,10 @@ private:
     std::unique_ptr<PragmaGenerator> pragma_generator_;
     std::unique_ptr<SourceAnnotator> source_annotator_;
     
-    // Analysis state
+    // keeps warnings during analysis
     std::vector<std::string> warnings_;
     
-    // Analysis orchestration methods
+    // internal analysis
     void runScalarAnalysis(LoopInfo& loop);
     void runArrayAnalysis(LoopInfo& loop);
     void runPointerAnalysis(LoopInfo& loop);

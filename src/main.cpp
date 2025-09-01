@@ -12,11 +12,12 @@
 using namespace clang;
 using namespace clang::tooling;
 
-// Global flags
+// global flags for mode
 bool generate_pragmas = false;
 bool verbose_mode = false;
 std::string output_filename;
 
+// generate output filename by adding "_openmp" before extension
 std::string generateOutputFilename(const std::string& input_file) {
     size_t dot_pos = input_file.find_last_of('.');
     if (dot_pos != std::string::npos) {
@@ -28,6 +29,7 @@ std::string generateOutputFilename(const std::string& input_file) {
     }
 }
 
+// clang frontend action that sets up our analyzer
 class AnalyzerAction : public ASTFrontendAction {
 private:
     bool generate_pragmas_;
@@ -42,6 +44,7 @@ public:
           input_filename_(input), verbose_(verbose) {}
 
     bool BeginSourceFileAction(CompilerInstance& compiler) override {
+        // suppress clang diagnostics
         DiagnosticsEngine &diags = compiler.getDiagnostics();
         diags.setSuppressAllDiagnostics(true);
         return ASTFrontendAction::BeginSourceFileAction(compiler);
@@ -56,7 +59,6 @@ public:
             consumer->setVerbose(false);
             consumer->setPragmaVerbose(verbose_);
         } else {
-
             consumer->setVerbose(verbose_);
             consumer->setPragmaVerbose(false);
         }
@@ -65,33 +67,32 @@ public:
     }
 };
 
+// print help message
 void printUsage(const char* progName) {
     std::cout << "STATIK - Static Analysis Tool for Loop Parallelization\n\n";
     std::cout << "Usage: " << progName << " [OPTIONS] <source_file>\n\n";
-    
     std::cout << "MODES:\n";
     std::cout << "  Analysis Only (default)\n";
     std::cout << "    " << progName << " code.c\n";
     std::cout << "    └─ Shows summary table of loop parallelization safety\n\n";
-    
     std::cout << "  Pragma Generation\n";
     std::cout << "    " << progName << " --generate-pragmas code.c\n";
     std::cout << "    └─ Creates code_openmp.c with OpenMP pragmas inserted\n\n";
-    
     std::cout << "OPTIONS:\n";
     std::cout << "  --generate-pragmas    Generate OpenMP pragma annotations\n";
     std::cout << "  --verbose            Show detailed analysis information\n";
     std::cout << "  -h, --help           Show this help message\n";
     std::cout << "  -v, --version        Show version information\n\n";
-
 }
 
+// print version info
 void printVersion() {
     std::cout << "STATIK v1.0.0\n";
     std::cout << "Static analysis tool for automatic OpenMP parallelization\n";
     std::cout << "Built with Clang/LLVM\n";
 }
 
+// show which mode we’re running in and relevant files
 void printModeInfo(const std::string& input_file) {
     if (generate_pragmas) {
         if (verbose_mode) {
@@ -118,6 +119,7 @@ void printModeInfo(const std::string& input_file) {
     }
 }
 
+// parse CLI args and set global flags
 bool parseArgs(int argc, char** argv, std::string& input_file) {
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -153,37 +155,39 @@ bool parseArgs(int argc, char** argv, std::string& input_file) {
 int main(int argc, char** argv) {
     std::string input_file;
 
+    // parse args, show help/version if needed
     if (argc < 2 || !parseArgs(argc, argv, input_file)) {
-        if (argc >= 2) return 0; // Help/version was shown
+        if (argc >= 2) return 0;
         printUsage(argv[0]);
         return 1;
     }
 
+    // generate output filename if pragmas are enabled
     if (generate_pragmas) {
         output_filename = generateOutputFilename(input_file);
     }
 
-    // Show mode information
+    // show current mode
     printModeInfo(input_file);
 
-    // Check if input file exists
+    // check if file exists
     std::ifstream file(input_file);
     if (!file.is_open()) {
         std::cerr << "Error: Could not open file '" << input_file << "'\n";
         return 1;
     }
 
-    // Read source file
+    // read source code into string
     std::string source_code((std::istreambuf_iterator<char>(file)),
                            std::istreambuf_iterator<char>());
     file.close();
 
-    // Create and configure the analyzer action
+    // create analyzer frontend action
     std::unique_ptr<FrontendAction> action = 
         std::make_unique<AnalyzerAction>(generate_pragmas, output_filename, 
                                        input_file, verbose_mode);
 
-    // Run the analysis
+    // run clang tooling
     bool result = runToolOnCode(std::move(action), source_code, input_file);
     
     if (!result) {

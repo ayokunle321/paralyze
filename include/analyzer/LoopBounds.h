@@ -6,15 +6,16 @@
 
 namespace statik {
 
+// captures loop bounds and iteration info
 struct LoopBounds {
-    std::string iterator_var; // "i", "j"
-    clang::Stmt* init_expr; // initialization statement (can be DeclStmt or Expr)
-    clang::Expr* condition_expr; // loop condition (i < N)
-    clang::Expr* increment_expr; // increment (i++, ++i, i+=1)
-    bool is_simple_pattern; // true if this is a simple i=0; i<N; i++ pattern
+    std::string iterator_var; 
+    clang::Stmt* init_expr;     
+    clang::Expr* condition_expr;   
+    clang::Expr* increment_expr;   
+    bool is_simple_pattern;        
     
     LoopBounds() : init_expr(nullptr), condition_expr(nullptr),
                    increment_expr(nullptr), is_simple_pattern(false) {}
 };
 
-} // namespace stati
+} // namespace statik

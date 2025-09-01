@@ -9,19 +9,21 @@
 
 namespace statik {
 
+// categorizes safety of function calls inside a loop
 enum class FunctionCallSafety {
-  SAFE,              // No function calls or only safe built-ins
-  POTENTIALLY_SAFE,  // Calls to known safe functions (math functions, etc)
-  UNSAFE             // Unknown functions or functions with side effects
+  SAFE,              // no calls or only safe built-ins
+  POTENTIALLY_SAFE,  // known safe functions (math)
+  UNSAFE             // unknown or side-effect functions
 };
 
+// record of a single function call in the source
 struct FunctionCall {
   std::string function_name;
   clang::SourceLocation location;
   unsigned line_number;
   bool is_builtin;
   bool is_math_function;
-  bool has_side_effects;   // Conservative assumption
+  bool has_side_effects;   // conservative assumption
   
   FunctionCall(const std::string& name, clang::SourceLocation loc, 
               unsigned line, bool builtin, bool math, bool side_effects)
@@ -29,16 +31,14 @@ struct FunctionCall {
         is_builtin(builtin), is_math_function(math), has_side_effects(side_effects) {}
 };
 
+// analyzes function calls in loops to check safety for parallelization
 class FunctionCallAnalyzer {
 public:
   explicit FunctionCallAnalyzer(clang::ASTContext* context) : context_(context) {}
   
   void analyzeFunctionCalls(LoopInfo& loop);
   FunctionCallSafety getFunctionCallSafety(const LoopInfo& loop) const;
-  
   void visitCallExpr(clang::CallExpr* callExpr, LoopInfo& loop);
-  
-  // Verbose control
   void setVerbose(bool verbose) { verbose_ = verbose; }
   
 private:

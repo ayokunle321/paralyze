@@ -16,7 +16,7 @@ bool AnalyzerVisitor::VisitFunctionDecl(FunctionDecl* func) {
 
     const std::string funcName = func->getNameAsString();
     
-    // Only show function info in verbose analysis mode
+    // only show function info in verbose analysis mode
     if (verbose_ && !generate_pragmas_) {
         SourceLocation loc = func->getLocation();
         std::cout << "\nFound function: " << funcName;
@@ -33,21 +33,21 @@ bool AnalyzerVisitor::VisitFunctionDecl(FunctionDecl* func) {
 }
 
 void AnalyzerVisitor::runAnalysis() {
-    // Mode 1: Analysis-only without verbose - Just show summary table
+    // mode 1: analysis-only without verbose - summary table
     if (!generate_pragmas_ && !verbose_) {
         loop_visitor_.printLoopSummary();
         return;
     }
 
-    // Mode 2: Analysis-only with verbose - Show detailed analysis + summary
+    // mode 2: analysis-only with verbose - detailed analysis + summary
     if (!generate_pragmas_ && verbose_) {
         loop_visitor_.printLoopSummary();
         return;
     }
 
-    // Mode 3: Pragma generation without verbose - Clean pragma output
+    // ,ode 3: pragma generation without verbose - clean pragma output
     if (generate_pragmas_ && !pragma_verbose_) {
-        // Just show the essential pragma generation info
+        // just show the essential pragma generation info
         const auto& detected_loops = loop_visitor_.getLoops();
         if (detected_loops.empty()) {
             std::cout << "No loops detected - no pragma generation needed\n";
@@ -56,25 +56,23 @@ void AnalyzerVisitor::runAnalysis() {
 
         std::cout << "\n=== OpenMP Pragma Generation ===\n";
         
-        // Set up the pipeline quietly
+        // set up the pipeline quietly
         PragmaGenerator pragma_gen;
         PragmaLocationMapper location_mapper(&context_->getSourceManager());
         SourceAnnotator annotator(&context_->getSourceManager());
 
-        // Configure for clean output
+        // configure for clean output
         pragma_gen.setVerbose(false);
-        
-        // Generate pragmas
         pragma_gen.generatePragmasForLoops(detected_loops);
         
-        // Only map insertion points for parallelizable loops
+        // only map insertion points for parallelizable loops
         for (const auto& loop : detected_loops) {
             if (!loop.has_dependencies) {
                 location_mapper.mapLoopToPragmaLocation(loop);
             }
         }
 
-        // Create the annotated source file (no if-check, since it’s void)
+        // create the annotated source file (no if-check, since it’s void)
         annotator.annotateSourceWithPragmas(input_filename_,
                                             pragma_gen.getGeneratedPragmas(),
                                             location_mapper.getInsertionPoints());
@@ -83,7 +81,7 @@ void AnalyzerVisitor::runAnalysis() {
             std::cout << "Successfully created: " << output_filename_ << "\n";
             std::cout << "Compile with: gcc -fopenmp " << output_filename_ << "\n";
             
-            // Show clean pragma summary
+            // show clean pragma summary
             pragma_gen.printCleanSummary();
         } else {
             std::cerr << "Error: Failed to create output file\n";
@@ -93,7 +91,7 @@ void AnalyzerVisitor::runAnalysis() {
         return;
     }
 
-    // Mode 4: Pragma generation with verbose - Show detailed pragma reasoning
+    // mode 4: pragma generation with verbose - detailed pragma reasoning
     if (generate_pragmas_ && pragma_verbose_) {
         const auto& detected_loops = loop_visitor_.getLoops();
         if (detected_loops.empty()) {
@@ -109,20 +107,18 @@ void AnalyzerVisitor::runAnalysis() {
             PragmaLocationMapper location_mapper(&context_->getSourceManager());
             SourceAnnotator annotator(&context_->getSourceManager());
 
-            // Enable verbose mode for detailed output
+            // enable verbose mode for detailed output
             pragma_gen.setVerbose(true);
-
-            // Generate pragmas for all loops
             pragma_gen.generatePragmasForLoops(detected_loops);
 
-            // Map insertion points
+            // map insertion points
             for (const auto& loop : detected_loops) {
                 if (!loop.has_dependencies) {
                     location_mapper.mapLoopToPragmaLocation(loop);
                 }
             }
 
-            // Create annotated file
+            // create annotated file
             annotator.annotateSourceWithPragmas(input_filename_,
                                                 pragma_gen.getGeneratedPragmas(),
                                                 location_mapper.getInsertionPoints());

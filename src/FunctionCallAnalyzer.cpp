@@ -88,7 +88,7 @@ void FunctionCallAnalyzer::visitCallExpr(CallExpr* callExpr, LoopInfo& loop) {
 }
 
 void FunctionCallAnalyzer::initializeSafeFunctions() {
-  // Math functions that don't have side effects
+  // math functions that don't have side effects
   safe_math_functions_ = {
     "sin", "cos", "tan", "asin", "acos", "atan", "atan2",
     "sinh", "cosh", "tanh", "asinh", "acosh", "atanh",
@@ -124,7 +124,7 @@ std::string FunctionCallAnalyzer::getFunctionName(CallExpr* callExpr) const {
       }
     }
     
-    // Handle function pointers and member calls
+    // handle function pointers and member calls
     if (Expr* callee = callExpr->getCallee()) {
       callee = callee->IgnoreParenImpCasts();
       
@@ -148,13 +148,13 @@ std::string FunctionCallAnalyzer::getFunctionName(CallExpr* callExpr) const {
 }
 
 bool FunctionCallAnalyzer::hasPotentialSideEffects(const std::string& function_name) const {
-  // Be conservative - assume unknown functions have side effects
+  // assume unknown functions have side effects
   
   if (isSafeMathFunction(function_name)) {
     return false;
   }
   
-  // Read-only string/char functions
+  //read-only string/char functions
   static const std::set<std::string> safe_functions = {
     "strlen", "strcmp", "strncmp", "strchr", "strstr",
     "memcmp", "isalpha", "isdigit", "isspace", "toupper", "tolower"
@@ -164,7 +164,7 @@ bool FunctionCallAnalyzer::hasPotentialSideEffects(const std::string& function_n
     return false;
   }
   
-  // Functions that definitely have side effects
+  // functions that definitely have side effects
   static const std::set<std::string> unsafe_functions = {
     "printf", "fprintf", "sprintf", "puts", "putchar",
     "scanf", "fscanf", "sscanf", "getchar", "gets", "fgets",
@@ -177,7 +177,7 @@ bool FunctionCallAnalyzer::hasPotentialSideEffects(const std::string& function_n
     return true;
   }
   
-  // Default to unsafe for unknown functions
+  // default to unsafe for unknown functions
   return true;
 }
 

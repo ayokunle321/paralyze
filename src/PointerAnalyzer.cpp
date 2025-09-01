@@ -42,7 +42,7 @@ PointerRisk PointerAnalyzer::getPointerRisk(const LoopInfo& loop) const {
     return PointerRisk::UNSAFE;
   }
   
-  // Any dereferencing is risky due to potential aliasing
+  // any dereferencing is risky due to potential aliasing
   for (const auto& op : pointer_ops_) {
     if (op.is_dereference) {
       return PointerRisk::POTENTIAL_ALIAS;
@@ -130,7 +130,7 @@ void PointerAnalyzer::visitBinaryOperator(BinaryOperator* binOp, LoopInfo& loop)
     }
   }
   
-  // Check for pointer assignments that create aliasing
+  // check for pointer assignments that create aliasing
   if (binOp->isAssignmentOp()) {
     if (isPointerType(lhs->getType()) && isPointerType(rhs->getType())) {
       std::string lhsName = extractPointerName(lhs);
@@ -184,7 +184,7 @@ std::string PointerAnalyzer::extractPointerName(Expr* expr) {
 }
 
 std::string PointerAnalyzer::extractPointerNameRecursive(Expr* expr, int depth) {
-  // Prevent infinite recursion
+  // prevent infinite recursion
   if (depth > 10) {
     return "complex_expr";
   }

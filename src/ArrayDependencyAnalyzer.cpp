@@ -14,7 +14,7 @@ void ArrayDependencyAnalyzer::analyzeArrayDependencies(LoopInfo& loop) {
              << loop.array_accesses.size() << " array accesses\n";
   }
   
-  // Check all pairs of array accesses for conflicts
+  // check all pairs of array accesses for conflicts
   for (size_t i = 0; i < loop.array_accesses.size(); i++) {
     for (size_t j = i + 1; j < loop.array_accesses.size(); j++) {
       const ArrayAccess& access1 = loop.array_accesses[i];
@@ -26,7 +26,7 @@ void ArrayDependencyAnalyzer::analyzeArrayDependencies(LoopInfo& loop) {
     }
   }
   
-  // Run cross-iteration analysis 
+  // run cross-iteration analysis 
   cross_iteration_analyzer_->setVerbose(verbose_); 
   cross_iteration_analyzer_->analyzeCrossIterationConflicts(loop);
   
@@ -53,7 +53,7 @@ bool ArrayDependencyAnalyzer::hasArrayDependencies(const LoopInfo& loop) const {
 void ArrayDependencyAnalyzer::checkArrayAccessPair(const ArrayAccess& access1, 
                                                    const ArrayAccess& access2,
                                                    const std::string& induction_var) {
-  // Skip read-only pairs
+  // skip read-only pairs
   if (!access1.is_write && !access2.is_write) {
     return;
   }
@@ -109,13 +109,13 @@ ArrayDependencyType ArrayDependencyAnalyzer::compareArrayIndices(Expr* index1,
       return ArrayDependencyType::UNKNOWN_RELATION;
     }
     
-    // Check for A[i] vs A[i] pattern
+    // check for A[i] vs A[i] pattern
     if (isSimpleInductionAccess(index1, induction_var) && 
         isSimpleInductionAccess(index2, induction_var)) {
       return ArrayDependencyType::SAME_INDEX;
     }
     
-    // Check for offset patterns like A[i] vs A[i+1]
+    // check for offset patterns like A[i] vs A[i+1]
     if (hasConstantOffset(index1, index2)) {
       return ArrayDependencyType::CONSTANT_OFFSET;
     }
@@ -153,7 +153,7 @@ bool ArrayDependencyAnalyzer::hasConstantOffset(Expr* index1, Expr* index2) {
   std::string str1 = exprToString(index1);
   std::string str2 = exprToString(index2);
   
-  // Look for arithmetic patterns 
+  // look for arithmetic patterns 
   if ((str1.find("+") != std::string::npos || str1.find("-") != std::string::npos) &&
       (str2.find("+") != std::string::npos || str2.find("-") != std::string::npos)) {
     return true;
@@ -181,7 +181,7 @@ std::string ArrayDependencyAnalyzer::exprToString(Expr* expr) {
       std::string lhs = exprToString(binOp->getLHS());
       std::string rhs = exprToString(binOp->getRHS());
       
-      // Avoid infinite recursion
+      // avoid infinite recursion
       if (lhs == "complex_expr" || rhs == "complex_expr") {
         return "complex_expr";
       }

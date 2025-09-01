@@ -6,9 +6,10 @@
 
 namespace statik {
 
+// info about a single array access
 struct ArrayAccess {
     std::string array_name;
-    clang::Expr* subscript;
+    clang::Expr* subscript;        // not owned
     clang::SourceLocation location;
     unsigned line_number;
     bool is_write;
@@ -19,4 +20,4 @@ struct ArrayAccess {
           line_number(line), is_write(write) {}
 };
 
-} // namespace stati
+} // namespace statik

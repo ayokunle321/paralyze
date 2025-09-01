@@ -92,11 +92,11 @@ bool SourceAnnotator::readSourceFile(const std::string& filename) {
 
 void SourceAnnotator::insertPragmaAnnotations(const std::vector<GeneratedPragma>& pragmas,
                                              const std::vector<PragmaInsertionPoint>& insertion_points) {
-  // Create a map of line numbers to pragmas for quick lookup
+  // create a map of line numbers to pragmas for quick lookup
   std::map<unsigned, std::string> pragma_map;
   
   for (const auto& pragma : pragmas) {
-    // Find the corresponding insertion point for this pragma
+    // find the corresponding insertion point for this pragma
     auto insertion_it = std::find_if(insertion_points.begin(), insertion_points.end(),
         [&pragma](const PragmaInsertionPoint& point) {
             return point.line_number == pragma.line_number;
@@ -109,7 +109,7 @@ void SourceAnnotator::insertPragmaAnnotations(const std::vector<GeneratedPragma>
     }
   }
   
-  // Apply pragmas to the appropriate lines
+  // apply pragmas to the appropriate lines
   for (auto& line : annotated_lines_) {
     auto pragma_it = pragma_map.find(line.line_number);
     if (pragma_it != pragma_map.end()) {
@@ -123,26 +123,26 @@ void SourceAnnotator::insertPragmaAnnotations(const std::vector<GeneratedPragma>
 }
 
 std::string SourceAnnotator::getIndentationForLine(unsigned line_number) {
-  // Find the line and extract its indentation
+  // find the line and extract its indentation
   for (const auto& line : annotated_lines_) {
     if (line.line_number == line_number) {
       std::string content = line.original_content;
       size_t first_non_space = content.find_first_not_of(" \t");
       
       if (first_non_space == std::string::npos) {
-        // Empty line or only whitespace
-        return "    "; // Default indentation
+        // empty line or only whitespace
+        return "    "; // 
       }
       
       return content.substr(0, first_non_space);
     }
   }
   
-  return "    "; // Default indentation if line not found
+  return "    "; // 
 }
 
 std::string SourceAnnotator::generateOutputFilename(const std::string& input_filename) {
-  // Generate output filename by adding "_openmp" before the extension
+  // generate output filename by adding "_openmp" before the extension
   size_t dot_pos = input_filename.find_last_of('.');
   
   if (dot_pos != std::string::npos) {

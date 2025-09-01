@@ -8,6 +8,7 @@
 
 namespace statik {
 
+// types of OpenMP pragmas
 enum class PragmaType {
     NO_PRAGMA,
     PARALLEL_FOR,
@@ -15,6 +16,7 @@ enum class PragmaType {
     SIMD
 };
 
+// representation of a pragma for a loop
 struct GeneratedPragma {
     PragmaType type;
     std::string pragma_text;
@@ -24,33 +26,31 @@ struct GeneratedPragma {
     bool requires_private_vars = false;
     std::vector<std::string> private_variables;
     ConfidenceScore confidence;
-    
+
     GeneratedPragma(PragmaType t, const std::string& text, const std::string& ltype,
-                   unsigned line, const std::string& reason)
+                    unsigned line, const std::string& reason)
         : type(t), pragma_text(text), loop_type(ltype), line_number(line), reasoning(reason) {}
 };
 
 class PragmaGenerator {
+public:
+    PragmaGenerator() : confidence_scorer_(std::make_unique<ConfidenceScorer>()) {}
+
+    void generatePragmasForLoops(const std::vector<LoopInfo>& loops);
+    void printCleanSummary() const;
+    void printPragmaSummary() const;
+
+    const std::vector<GeneratedPragma>& getGeneratedPragmas() const { 
+        return generated_pragmas_; 
+    }
+
+    void setVerbose(bool verbose) { verbose_ = verbose; }
+
 private:
     std::vector<GeneratedPragma> generated_pragmas_;
     std::unique_ptr<ConfidenceScorer> confidence_scorer_;
     bool verbose_ = false;
 
-public:
-    PragmaGenerator() : confidence_scorer_(std::make_unique<ConfidenceScorer>()) {}
-
-    void generatePragmasForLoops(const std::vector<LoopInfo>& loops);
-    
-    void printCleanSummary() const;
-    void printPragmaSummary() const;
-    
-    const std::vector<GeneratedPragma>& getGeneratedPragmas() const { 
-        return generated_pragmas_; 
-    }
-    
-    void setVerbose(bool verbose) { verbose_ = verbose; }
-
-private:
     PragmaType determinePragmaType(const LoopInfo& loop);
     std::string generatePragmaText(PragmaType type, const LoopInfo& loop);
     std::string generateReasoning(PragmaType type, const LoopInfo& loop);

@@ -10,13 +10,15 @@
 
 namespace statik {
 
+// kinds of dependencies between array accesses
 enum class ArrayDependencyType {
   NO_DEPENDENCY,
-  SAME_INDEX,          // A[i] and A[i] - write conflict
-  CONSTANT_OFFSET,     // A[i] and A[i+1] - loop-carried dependency  
-  UNKNOWN_RELATION     // Can't analyze - assume unsafe
+  SAME_INDEX,          // e.g. A[i] vs A[i] - write conflict
+  CONSTANT_OFFSET,     // e.g. A[i] vs A[i+1] - loop-carried
+  UNKNOWN_RELATION     // assume unsafe
 };
 
+// record of a single dependency found between two accesses
 struct ArrayDependency {
   std::string array_name;
   ArrayDependencyType type;
@@ -32,6 +34,7 @@ struct ArrayDependency {
         sink_line(sink_line), source_index(src_idx), sink_index(sink_idx) {}
 };
 
+// main analyzer for checking array dependencies inside a loop
 class ArrayDependencyAnalyzer {
 public:
   explicit ArrayDependencyAnalyzer(clang::ASTContext* context) 
@@ -44,11 +47,12 @@ public:
   void setVerbose(bool verbose) { verbose_ = verbose; }
   
 private:
-  clang::ASTContext* context_;
+  clang::ASTContext* context_;  
   bool verbose_;
   std::vector<ArrayDependency> detected_dependencies_;
   std::unique_ptr<CrossIterationAnalyzer> cross_iteration_analyzer_;
   
+  // helpers for comparing access patterns
   ArrayDependencyType compareArrayIndices(clang::Expr* index1, clang::Expr* index2,
                                         const std::string& induction_var);
   std::string exprToString(clang::Expr* expr);

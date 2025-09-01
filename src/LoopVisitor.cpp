@@ -2,7 +2,6 @@
 #include "clang/AST/Expr.h"
 #include "clang/AST/Stmt.h"
 #include "clang/AST/ParentMapContext.h"
-#include "analyzer/FunctionCallAnalyzer.h"
 #include <iostream>
 #include <iomanip> 
 
@@ -17,7 +16,7 @@ bool LoopVisitor::TraverseForStmt(ForStmt* forLoop) {
     addLoop(forLoop, loc, "for");
     size_t currentIndex = loops_.size() - 1;
     
-    // Set up parent-child relationship
+    // set up parent-child relationship
     if (!loop_stack_.empty()) {
         size_t parentIndex = loop_stack_.top();
         loops_[currentIndex].setParent(parentIndex, loops_[parentIndex].depth);
@@ -28,7 +27,7 @@ bool LoopVisitor::TraverseForStmt(ForStmt* forLoop) {
 
     loop_stack_.push(currentIndex);
     
-    // Traverse init, condition, increment in context of THIS loop
+    // traverse init, condition, increment in context of this loop
     if (forLoop->getInit())
         TraverseStmt(forLoop->getInit());
     if (forLoop->getCond())
@@ -36,18 +35,17 @@ bool LoopVisitor::TraverseForStmt(ForStmt* forLoop) {
     if (forLoop->getInc())
         TraverseStmt(forLoop->getInc());
     
-    // Traverse body
+    // traverse body
     if (forLoop->getBody())
         TraverseStmt(forLoop->getBody());
     
-    // Finalize AFTER all traversal is complete
+    // finalize after all traversal is complete
     markInductionVariable(loops_[currentIndex]);
     finalizeDependencyAnalysis(loops_[currentIndex]);
     loops_[currentIndex].finalizeMetrics();
     
     loop_stack_.pop();
     
-    // Return true - we handled traversal manually
     return true;
 }
 
@@ -66,7 +64,7 @@ bool LoopVisitor::TraverseWhileStmt(WhileStmt* whileLoop) {
     
     loop_stack_.push(currentIndex);
     
-    // Traverse condition and body
+    // traverse condition and body
     if (whileLoop->getCond())
         TraverseStmt(whileLoop->getCond());
     if (whileLoop->getBody())
@@ -95,7 +93,7 @@ bool LoopVisitor::TraverseDoStmt(DoStmt* doLoop) {
     
     loop_stack_.push(currentIndex);
     
-    // Traverse body and condition
+    // traverse body and condition
     if (doLoop->getBody())
         TraverseStmt(doLoop->getBody());
     if (doLoop->getCond())
@@ -195,14 +193,14 @@ bool LoopVisitor::VisitUnaryOperator(UnaryOperator* unaryOp) {
         getCurrentLoop()->incrementArithmeticOps();
     }
 
-    // Detect pointer dereferences that represent array accesses
+    // detect pointer dereferences that represent array accesses
     if (unaryOp->getOpcode() == UO_Deref) {
         Expr* subExpr = unaryOp->getSubExpr()->IgnoreParenImpCasts();
         
-        // Check if dereferencing something with addition (pointer arithmetic)
+        // check if dereferencing something with addition (pointer arithmetic)
         if (auto* binOp = dyn_cast<BinaryOperator>(subExpr)) {
             if (binOp->getOpcode() == BO_Add) {
-                // Extract the base pointer name
+                // extract the base pointer name
                 std::string baseName = extractPointerBaseName(binOp->getLHS());
                 
                 if (!baseName.empty() && baseName != "complex_expr") {
@@ -212,7 +210,7 @@ bool LoopVisitor::VisitUnaryOperator(UnaryOperator* unaryOp) {
                     
                     bool is_write = isWriteAccessUnary(unaryOp);
                     
-                    // Create array access with the offset expression
+                    // create array access with the offset expression
                     ArrayAccess access(baseName, binOp->getRHS(), loc, line, is_write);
                     getCurrentLoop()->addArrayAccess(access);
                     
@@ -243,7 +241,7 @@ bool LoopVisitor::VisitCallExpr(CallExpr* callExpr) {
                   << "\n";
     }
 
-    // Analyze function call for safety
+    // analyze function call for safety
     FunctionCallAnalyzer temp_analyzer(context_);
     temp_analyzer.visitCallExpr(callExpr, *currentLoop);
 
@@ -257,7 +255,7 @@ bool LoopVisitor::VisitCallExpr(CallExpr* callExpr) {
         func_name = "unknown_function";
     }
 
-    // Check safety using predefined unsafe function list
+    // check safety using predefined unsafe function list
     bool is_safe = true;
     static const std::set<std::string> unsafe_functions = {
         "printf", "fprintf", "sprintf", "puts", "putchar",
@@ -281,9 +279,9 @@ void LoopVisitor::analyzeForLoopBounds(ForStmt* forLoop, LoopInfo& info) {
     info.bounds.condition_expr = forLoop->getCond();
     info.bounds.increment_expr = forLoop->getInc();
 
-    // Extract iterator variable name and handle both declaration and assignment
+    // extract iterator variable name and handle both declaration and assignment
     if (forLoop->getInit()) {
-        // Case 1: Variable declared in init (for (int i = 0; ...))
+        // case 1: variable declared in init
         if (auto* declStmt = dyn_cast<DeclStmt>(forLoop->getInit())) {
             if (declStmt->isSingleDecl()) {
                 if (auto* varDecl = dyn_cast<VarDecl>(declStmt->getSingleDecl())) {
@@ -291,7 +289,7 @@ void LoopVisitor::analyzeForLoopBounds(ForStmt* forLoop, LoopInfo& info) {
                 }
             }
         }
-        // Case 2: Variable assigned in init (for (i = 0; ...))
+        // case 2: variable assigned in init
         else if (auto* initExpr = dyn_cast<Expr>(forLoop->getInit())) {
             initExpr = initExpr->IgnoreParenImpCasts();
             if (auto* binOp = dyn_cast<BinaryOperator>(initExpr)) {
@@ -304,7 +302,7 @@ void LoopVisitor::analyzeForLoopBounds(ForStmt* forLoop, LoopInfo& info) {
         }
     }
 
-    // Check for simple loop pattern
+    // check for simple loop pattern
     if (!info.bounds.iterator_var.empty() && info.bounds.condition_expr &&
         info.bounds.increment_expr) {
         info.bounds.is_simple_pattern = true;
@@ -342,7 +340,7 @@ void LoopVisitor::finalizeDependencyAnalysis(LoopInfo& loop) {
     
     dependency_analyzer_->analyzeDependencies(loop);
     
-    // Combine both checks
+    // combine both checks
     bool has_deps = dependency_analyzer_->hasDependencies(loop);
     bool has_unsafe_nested = loop.hasUnsafeCallsRecursive(loops_);
     
@@ -350,7 +348,7 @@ void LoopVisitor::finalizeDependencyAnalysis(LoopInfo& loop) {
         std::cout << "  Note: Nested loop contains unsafe function calls\n";
     }
     
-    // Mark as having dependencies if either condition is true
+    // mark as having dependencies if either condition is true
     loop.setHasDependencies(has_deps || has_unsafe_nested);
 }
 
@@ -364,7 +362,7 @@ bool LoopVisitor::VisitArraySubscriptExpr(ArraySubscriptExpr* arrayExpr) {
     SourceManager& sm = context_->getSourceManager();
     unsigned line = sm.getSpellingLineNumber(loc);
 
-    // Check if this is a write by looking at parent context
+    // check if this is a write by looking at parent context
     bool is_write = false;
     auto parents = context_->getParents(*arrayExpr);
     for (const auto& parent : parents) {
@@ -379,7 +377,7 @@ bool LoopVisitor::VisitArraySubscriptExpr(ArraySubscriptExpr* arrayExpr) {
     ArrayAccess access(arrayName, arrayExpr->getIdx(), loc, line, is_write);
     getCurrentLoop()->addArrayAccess(access);
 
-    // Collect for clean summary output
+    // collect for clean summary output
     if (verbose_) {
         std::string subscript_str = extractSubscriptString(arrayExpr->getIdx());
         std::string access_pattern = arrayName + "[" + subscript_str + "]";
@@ -394,7 +392,7 @@ bool LoopVisitor::VisitArraySubscriptExpr(ArraySubscriptExpr* arrayExpr) {
 std::string LoopVisitor::extractArrayBaseName(ArraySubscriptExpr* arrayExpr) {
     Expr* base = arrayExpr->getBase()->IgnoreParenImpCasts();
 
-    // Handle multi-dimensional arrays
+    // handle multi-dimensional arrays
     while (auto* innerArray = dyn_cast<ArraySubscriptExpr>(base)) {
         base = innerArray->getBase()->IgnoreParenImpCasts();
     }
@@ -415,7 +413,7 @@ std::string LoopVisitor::extractPointerBaseName(Expr* expr) {
         return declRef->getDecl()->getNameAsString();
     }
     
-    // Handle cases like (tmp + offset) where we want "tmp"
+    // handle cases like (tmp + offset) where we want "tmp"
     if (auto* binOp = dyn_cast<BinaryOperator>(expr)) {
         return extractPointerBaseName(binOp->getLHS());
     }
@@ -525,7 +523,7 @@ VariableScope LoopVisitor::determineVariableScope(VarDecl* varDecl) const {
         return VariableScope::FUNCTION_LOCAL;
     }
 
-    // Get current loop index
+    // get current loop index
     size_t currentIndex = loop_stack_.top();
     const LoopInfo& currentLoop = loops_[currentIndex];
 
@@ -542,7 +540,7 @@ VariableScope LoopVisitor::determineVariableScope(VarDecl* varDecl) const {
 
     SourceManager& sm = context_->getSourceManager();
 
-    // Check if variable is declared in the for-loop's init statement
+    // check if variable is declared in the for-loop's init statement
     if (auto* forLoop = dyn_cast<ForStmt>(currentLoop.stmt)) {
         if (auto* declStmt = dyn_cast_or_null<DeclStmt>(forLoop->getInit())) {
             if (declStmt->isSingleDecl() && declStmt->getSingleDecl() == varDecl) {
@@ -555,7 +553,7 @@ VariableScope LoopVisitor::determineVariableScope(VarDecl* varDecl) const {
         }
     }
 
-    // Check if variable is declared inside the loop body
+    // check if variable is declared inside the loop body
     if (sm.getFileID(declLoc) == sm.getFileID(loopStart)) {
         unsigned declOffset = sm.getFileOffset(declLoc);
         unsigned loopStartOffset = sm.getFileOffset(loopStart);
@@ -599,7 +597,7 @@ void LoopVisitor::printLoopSummary() const {
         return;
     }
 
-    // Count parallelizable loops
+    // count parallelizable loops
     size_t parallelizable_count = 0;
     for (const auto& loop : loops_) {
         if (loop.isParallelizable()) {
@@ -617,19 +615,19 @@ void LoopVisitor::printLoopSummary() const {
     for (size_t i = 0; i < loops_.size(); i++) {
         const auto& loop = loops_[i];
         
-        // Format ID
+        // format ID
         std::cout << "│ L" << (i + 1);
         if (i + 1 < 10) std::cout << "  │";
         else std::cout << " │";
 
-        // Format line number
+        // format line number
         std::cout << " " << std::setw(4) << loop.line_number << " │";
 
-        // Format type
+        // format type
         std::string type = loop.loop_type;
         std::cout << " " << std::setw(9) << std::left << type << " │";
 
-        // Determine status and reasoning
+        // determine status and reasoning
         std::string status, reason;
         if (loop.isParallelizable()) {
             status = "SAFE";
@@ -653,20 +651,20 @@ void LoopVisitor::printLoopSummary() const {
             }
         }
 
-        // Format status
+        // format status
         std::cout << " " << std::setw(15) << std::left << status << " │";
         
-        // Format reason (truncate if too long)
+        // format reason and truncate if too long
         if (reason.length() > 24) {
             reason = reason.substr(0, 21) + "...";
         }
         std::cout << " " << std::setw(24) << std::left << reason << " │\n";
     }
 
-    // Table footer
+    // table footer
     std::cout << "└─────┴──────┴───────────┴─────────────────┴──────────────────────────┘\n";
 
-    // Summary
+    // summary
     std::cout << "\nSummary:\n";
     std::cout << "  Parallelizable: " << parallelizable_count << "/" << loops_.size()
               << " (" << (loops_.size() > 0 ? (parallelizable_count * 100 / loops_.size()) : 0) << "%)\n";

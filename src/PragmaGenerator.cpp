@@ -21,7 +21,7 @@ void PragmaGenerator::generatePragmasForLoops(const std::vector<LoopInfo>& loops
             GeneratedPragma pragma(pragma_type, pragma_text, loop.loop_type,
                                  loop.line_number, reasoning);
 
-            // Add private variables if needed
+            // add private variables if needed
             std::vector<std::string> private_vars = identifyPrivateVariables(loop);
             if (!private_vars.empty()) {
                 pragma.requires_private_vars = true;
@@ -34,7 +34,7 @@ void PragmaGenerator::generatePragmasForLoops(const std::vector<LoopInfo>& loops
                 pragma.pragma_text += ")";
             }
 
-            // Calculate confidence score
+            // calculate confidence score
             if (confidence_scorer_) {
                 pragma.confidence = confidence_scorer_->calculateConfidence(loop, pragma);
             } else {
@@ -45,7 +45,7 @@ void PragmaGenerator::generatePragmasForLoops(const std::vector<LoopInfo>& loops
 
             generated_pragmas_.push_back(pragma);
 
-            // Only show detailed info in verbose mode
+            // only show detailed info in verbose mode
             if (verbose_) {
                 std::cout << "\nGenerated pragma for " << loop.loop_type
                          << " loop at line " << loop.line_number << ":\n";
@@ -145,7 +145,7 @@ PragmaType PragmaGenerator::determinePragmaType(const LoopInfo& loop) {
         return PragmaType::NO_PRAGMA;
     }
 
-    // Be conservative with nested loops
+    // be conservative with nested loops
     if (loop.depth > 0) {
         if (shouldUseSimd(loop)) {
             return PragmaType::SIMD;
@@ -153,7 +153,7 @@ PragmaType PragmaGenerator::determinePragmaType(const LoopInfo& loop) {
         return PragmaType::NO_PRAGMA;
     }
 
-    // For outermost loops, consider SIMD + parallelization
+    // for outermost loops, consider SIMD + parallelization
     if (shouldUseSimd(loop)) {
         return PragmaType::PARALLEL_FOR_SIMD;
     }
@@ -200,12 +200,12 @@ bool PragmaGenerator::shouldUseSimd(const LoopInfo& loop) {
         return false;
     }
 
-    // Prefer arithmetic-heavy loops
+    // prefer arithmetic-heavy loops
     if (loop.metrics.arithmetic_ops > loop.metrics.function_calls * 2) {
         return true;
     }
 
-    // Inner loops with memory access are good SIMD candidates
+    // inner loops with memory access are good SIMD candidates
     if (isInnerLoop(loop) && loop.metrics.memory_accesses > 0) {
         return true;
     }
@@ -214,7 +214,7 @@ bool PragmaGenerator::shouldUseSimd(const LoopInfo& loop) {
 }
 
 bool PragmaGenerator::hasSimpleArrayAccess(const LoopInfo& loop) {
-    // If loop is parallelizable and has array access, assume it's simple enough
+    // if loop is parallelizable and has array access, assume it's simple enough
     return !loop.array_accesses.empty();
 }
 
@@ -228,12 +228,12 @@ std::vector<std::string> PragmaGenerator::identifyPrivateVariables(const LoopInf
     for (const auto& var_pair : loop.variables) {
         const auto& var = var_pair.second;
         
-        // Skip induction variables (automatically private in OpenMP)
+        // skip induction variables (automatically private in OpenMP)
         if (var.isInductionVariable()) {
             continue;
         }
 
-        // Loop-local variables that are written should be private
+        // loop-local variables that are written should be private
         if (var.scope == VariableScope::LOOP_LOCAL && var.hasWrites()) {
             private_vars.push_back(var.name);
         }

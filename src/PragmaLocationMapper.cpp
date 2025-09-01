@@ -18,7 +18,7 @@ void PragmaLocationMapper::mapLoopToPragmaLocation(const LoopInfo& loop) {
     return;
   }
   
-  // Skip macro expansions
+  // skip macro expansions
   if (isLocationInMacro(pragma_loc)) {
     std::cout << "  Skipping loop in macro expansion\n";
     return;
@@ -57,7 +57,7 @@ SourceLocation PragmaLocationMapper::findPragmaInsertionLocation(Stmt* loop_stmt
     return SourceLocation();
   }
   
-  // Handle macro expansions
+  // handle macro expansions
   if (loop_start.isMacroID()) {
     loop_start = source_manager_->getSpellingLoc(loop_start);
     
@@ -76,7 +76,7 @@ SourceLocation PragmaLocationMapper::findPragmaInsertionLocation(Stmt* loop_stmt
         source_manager_->getFileID(line_start), line_num - 1, 1);
     
     if (prev_line.isValid()) {
-      // For now just use current line - could improve this
+      // for now just use current line - could improve this
       return line_start;
     }
   }
@@ -107,8 +107,7 @@ std::string PragmaLocationMapper::getIndentationAtLocation(SourceLocation loc) {
   
   SourceLocation line_start = moveToStartOfLine(loc);
   
-  // TODO: Actually read the source file to get real indentation
-  // For now just return reasonable default
+  // TODO: actually read the source file to get real indentation
   return "    ";
 }
 
@@ -117,7 +116,7 @@ SourceLocation PragmaLocationMapper::moveToStartOfLine(SourceLocation loc) {
     return loc;
   }
   
-  // Could use Clang's Lexer class for better line handling
+  // could use Clang's Lexer class for better line handling
   unsigned line = source_manager_->getSpellingLineNumber(loc);
   FileID file_id = source_manager_->getFileID(loc);
   
