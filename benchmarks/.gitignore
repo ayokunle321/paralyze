@@ -1,0 +1,8 @@
+*.o
+*_baseline
+*_statik
+*_gcc_auto
+*_openmp.c
+
+*.out
+*.dSYM/

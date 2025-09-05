@@ -7,7 +7,6 @@ statik
 .DS_Store
 *.log
 compile_commands.json
-PolyBenchC-4.2.1/
 
 # Test outputs
 tests/*.out
