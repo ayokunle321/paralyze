@@ -18,5 +18,5 @@ make
 
 ## Building
 ```bash
-./statik input.c
+./paralyze input.c
 ```

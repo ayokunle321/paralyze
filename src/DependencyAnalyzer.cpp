@@ -3,14 +3,17 @@
 
 using namespace clang;
 
-namespace statik {
+namespace paralyze
+{
 
-void DependencyAnalyzer::analyzeDependencies(LoopInfo& loop) {
+void DependencyAnalyzer::analyzeDependencies(LoopInfo& loop)
+{
   manager_->analyzeLoop(loop);
 }
 
-bool DependencyAnalyzer::hasDependencies(const LoopInfo& loop) const {
+bool DependencyAnalyzer::hasDependencies(const LoopInfo& loop) const
+{
   return !manager_->isLoopParallelizable(loop);
 }
 
-} // namespace statik
+} // namespace paralyze

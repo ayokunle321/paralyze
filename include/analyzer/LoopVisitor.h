@@ -1,79 +1,88 @@
 #pragma once
 
-#include "clang/AST/RecursiveASTVisitor.h"
-#include "clang/AST/ASTContext.h"
-#include "analyzer/LoopInfo.h"
 #include "analyzer/DependencyAnalyzer.h"
+#include "analyzer/LoopInfo.h"
+#include "clang/AST/ASTContext.h"
+#include "clang/AST/RecursiveASTVisitor.h"
+#include <map>
 #include <stack>
 #include <vector>
-#include <map>
 
-namespace statik {
+namespace paralyze
+{
 
 // stores array accesses for a specific line
-struct LineArrayAccesses {
-    unsigned line_number;
-    std::vector<std::pair<std::string, bool>> accesses; // {pattern, is_write}
+struct LineArrayAccesses
+{
+  unsigned line_number;
+  std::vector<std::pair<std::string, bool>> accesses; // {pattern, is_write}
 };
 
-class LoopVisitor : public clang::RecursiveASTVisitor<LoopVisitor> {
+class LoopVisitor : public clang::RecursiveASTVisitor<LoopVisitor>
+{
 public:
-    explicit LoopVisitor(clang::ASTContext* context, DependencyAnalyzer* analyzer)
-        : context_(context), dependency_analyzer_(analyzer), verbose_(false) {}
+  explicit LoopVisitor(clang::ASTContext* context, DependencyAnalyzer* analyzer)
+      : context_(context), dependency_analyzer_(analyzer), verbose_(false)
+  {
+  }
 
-    bool TraverseForStmt(clang::ForStmt* forLoop);
-    bool TraverseWhileStmt(clang::WhileStmt* whileLoop);
-    bool TraverseDoStmt(clang::DoStmt* doLoop);
+  bool TraverseForStmt(clang::ForStmt* forLoop);
+  bool TraverseWhileStmt(clang::WhileStmt* whileLoop);
+  bool TraverseDoStmt(clang::DoStmt* doLoop);
 
-    bool VisitVarDecl(clang::VarDecl* varDecl);
-    bool VisitDeclRefExpr(clang::DeclRefExpr* declRef);
-    bool VisitBinaryOperator(clang::BinaryOperator* binOp);
-    bool VisitUnaryOperator(clang::UnaryOperator* unaryOp);
-    bool VisitCallExpr(clang::CallExpr* callExpr);
-    bool VisitArraySubscriptExpr(clang::ArraySubscriptExpr* arrayExpr);
+  bool VisitVarDecl(clang::VarDecl* varDecl);
+  bool VisitDeclRefExpr(clang::DeclRefExpr* declRef);
+  bool VisitBinaryOperator(clang::BinaryOperator* binOp);
+  bool VisitUnaryOperator(clang::UnaryOperator* unaryOp);
+  bool VisitCallExpr(clang::CallExpr* callExpr);
+  bool VisitArraySubscriptExpr(clang::ArraySubscriptExpr* arrayExpr);
 
-    const std::vector<LoopInfo>& getLoops() const { return loops_; }
-    void printLoopSummary() const;
-    void setVerbose(bool verbose) { verbose_ = verbose; }
+  const std::vector<LoopInfo>& getLoops() const { return loops_; }
+  void printLoopSummary() const;
+  void setVerbose(bool verbose) { verbose_ = verbose; }
 
 private:
-    clang::ASTContext* context_;
-    DependencyAnalyzer* dependency_analyzer_;
-    std::vector<LoopInfo> loops_;
-    std::stack<size_t> loop_stack_;
-    bool verbose_ = false;
+  clang::ASTContext* context_;
+  DependencyAnalyzer* dependency_analyzer_;
+  std::vector<LoopInfo> loops_;
+  std::stack<size_t> loop_stack_;
+  bool verbose_ = false;
 
-    std::map<unsigned, LineArrayAccesses> line_access_summaries_;
+  std::map<unsigned, LineArrayAccesses> line_access_summaries_;
 
-    // helpers
-    LoopInfo* getCurrentLoop() {
-        if (loop_stack_.empty()) return nullptr;
-        return &loops_[loop_stack_.top()];
-    }
+  // helpers
+  LoopInfo* getCurrentLoop()
+  {
+    if (loop_stack_.empty())
+      return nullptr;
+    return &loops_[loop_stack_.top()];
+  }
 
-    const LoopInfo* getCurrentLoop() const {
-        if (loop_stack_.empty()) return nullptr;
-        return &loops_[loop_stack_.top()];
-    }
-    
-    bool isInsideLoop() const { return !loop_stack_.empty(); }
+  const LoopInfo* getCurrentLoop() const
+  {
+    if (loop_stack_.empty())
+      return nullptr;
+    return &loops_[loop_stack_.top()];
+  }
 
-    void addLoop(clang::Stmt* stmt, clang::SourceLocation loc, const std::string& type);
-    void analyzeForLoopBounds(clang::ForStmt* forLoop, LoopInfo& info);
-    void markInductionVariable(LoopInfo& loop);
-    void finalizeDependencyAnalysis(LoopInfo& loop);
+  bool isInsideLoop() const { return !loop_stack_.empty(); }
 
-    std::string extractArrayBaseName(clang::ArraySubscriptExpr* arrayExpr);
-    std::string extractSubscriptString(clang::Expr* idx);
-    void printArrayAccessSummary();
+  void addLoop(clang::Stmt* stmt, clang::SourceLocation loc, const std::string& type);
+  void analyzeForLoopBounds(clang::ForStmt* forLoop, LoopInfo& info);
+  void markInductionVariable(LoopInfo& loop);
+  void finalizeDependencyAnalysis(LoopInfo& loop);
 
-    std::string extractPointerBaseName(clang::Expr* expr);
-    bool isWriteAccessUnary(clang::UnaryOperator* unaryOp);
+  std::string extractArrayBaseName(clang::ArraySubscriptExpr* arrayExpr);
+  std::string extractSubscriptString(clang::Expr* idx);
+  void printArrayAccessSummary();
 
-    bool isWriteAccess(clang::DeclRefExpr* declRef);
-    bool isArithmeticOp(clang::BinaryOperator* binOp);
-    bool isComparisonOp(clang::BinaryOperator* binOp);
-    VariableScope determineVariableScope(clang::VarDecl* varDecl) const;
+  std::string extractPointerBaseName(clang::Expr* expr);
+  bool isWriteAccessUnary(clang::UnaryOperator* unaryOp);
+
+  bool isWriteAccess(clang::DeclRefExpr* declRef);
+  bool isArithmeticOp(clang::BinaryOperator* binOp);
+  bool isComparisonOp(clang::BinaryOperator* binOp);
+  VariableScope determineVariableScope(clang::VarDecl* varDecl) const;
 };
 
-} // namespace statik
+} // namespace paralyze

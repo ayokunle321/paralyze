@@ -10,34 +10,34 @@ def calculate_speedups(csv_file):
         for row in reader:
             kernel = row['kernel']
             baseline = float(row['baseline'])
-            statik_4t = float(row['statik_4t'])
+            paralyze_4t = float(row['paralyze_4t'])
             gcc_auto = float(row['gcc_auto'])
             
-            speedup = baseline / statik_4t
+            speedup = baseline / paralyze_4t
             gcc_speedup = baseline / gcc_auto
             efficiency = speedup / 4  # 4 threads
             
             results.append({
                 'kernel': kernel,
                 'baseline': baseline,
-                'statik_4t': statik_4t,
+                'paralyze_4t': paralyze_4t,
                 'speedup': speedup,
                 'efficiency': efficiency,
                 'gcc_speedup': gcc_speedup
             })
     
     # print summary
-    print(f"{'Kernel':<12} {'Baseline':<10} {'STATIK 4t':<10} {'Speedup':<10} {'Efficiency':<12} {'GCC Speedup':<12}")
+    print(f"{'Kernel':<12} {'Baseline':<10} {'PARALYZE 4t':<10} {'Speedup':<10} {'Efficiency':<12} {'GCC Speedup':<12}")
     print("-" * 76)
     
     total_speedup = 0
     for r in results:
-        print(f"{r['kernel']:<12} {r['baseline']:<10.4f} {r['statik_4t']:<10.4f} {r['speedup']:<10.2f}x {r['efficiency']:<12.2%} {r['gcc_speedup']:<12.2f}x")
+        print(f"{r['kernel']:<12} {r['baseline']:<10.4f} {r['paralyze_4t']:<10.4f} {r['speedup']:<10.2f}x {r['efficiency']:<12.2%} {r['gcc_speedup']:<12.2f}x")
         total_speedup += r['speedup']
     
     avg_speedup = total_speedup / len(results)
     print("-" * 76)
-    print(f"Average STATIK speedup: {avg_speedup:.2f}x")
+    print(f"Average PARALYZE speedup: {avg_speedup:.2f}x")
     
     # best/worst
     best = max(results, key=lambda x: x['speedup'])

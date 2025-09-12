@@ -5,18 +5,18 @@ import numpy as np
 
 def visualize_speedups(csv_file):
     kernels = []
-    statik_speedups = []
+    paralyze_speedups = []
     gcc_speedups = []
     
     with open(csv_file, 'r') as f:
         reader = csv.DictReader(f)
         for row in reader:
             baseline = float(row['baseline'])
-            statik_4t = float(row['statik_4t'])
+            paralyze_4t = float(row['paralyze_4t'])
             gcc_auto = float(row['gcc_auto'])
             
             kernels.append(row['kernel'])
-            statik_speedups.append(baseline / statik_4t)
+            paralyze_speedups.append(baseline / paralyze_4t)
             gcc_speedups.append(baseline / gcc_auto)
     
     # create bar chart
@@ -24,7 +24,7 @@ def visualize_speedups(csv_file):
     width = 0.35
     
     fig, ax = plt.subplots(figsize=(14, 6))
-    bars1 = ax.bar(x - width/2, statik_speedups, width, label='STATIK (4 threads)', color='#2ecc71')
+    bars1 = ax.bar(x - width/2, paralyze_speedups, width, label='PARALYZE (4 threads)', color='#2ecc71')
     bars2 = ax.bar(x + width/2, gcc_speedups, width, label='GCC Auto-parallel', color='#e74c3c')
     
     # add baseline reference line
@@ -32,7 +32,7 @@ def visualize_speedups(csv_file):
     
     ax.set_xlabel('Kernel')
     ax.set_ylabel('Speedup (vs baseline)')
-    ax.set_title('Parallelization Speedup Comparison: STATIK vs GCC Auto-parallel')
+    ax.set_title('Parallelization Speedup Comparison: PARALYZE vs GCC Auto-parallel')
     ax.set_xticks(x)
     ax.set_xticklabels(kernels, rotation=45, ha='right')
     ax.legend()
@@ -42,7 +42,7 @@ def visualize_speedups(csv_file):
     plt.savefig('../results/speedup_comparison.png', dpi=150, bbox_inches='tight')
     print("Saved speedup comparison chart to ../results/speedup_comparison.png")
     
-    # create thread scaling chart for STATIK
+    # create thread scaling chart for PARALYZE
     fig2, ax2 = plt.subplots(figsize=(14, 6))
     
     # get top 5 best performing kernels
@@ -51,7 +51,7 @@ def visualize_speedups(csv_file):
         reader = csv.DictReader(f)
         for row in reader:
             baseline = float(row['baseline'])
-            speedup_4t = baseline / float(row['statik_4t'])
+            speedup_4t = baseline / float(row['paralyze_4t'])
             speedup_data.append((row['kernel'], speedup_4t))
     
     speedup_data.sort(key=lambda x: x[1], reverse=True)
@@ -65,10 +65,10 @@ def visualize_speedups(csv_file):
                 baseline = float(row['baseline'])
                 threads = [1, 2, 4, 8]
                 speedups = [
-                    baseline / float(row['statik_1t']),
-                    baseline / float(row['statik_2t']),
-                    baseline / float(row['statik_4t']),
-                    baseline / float(row['statik_8t'])
+                    baseline / float(row['paralyze_1t']),
+                    baseline / float(row['paralyze_2t']),
+                    baseline / float(row['paralyze_4t']),
+                    baseline / float(row['paralyze_8t'])
                 ]
                 ax2.plot(threads, speedups, marker='o', label=row['kernel'], linewidth=2)
     

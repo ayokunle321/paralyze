@@ -20,7 +20,7 @@ KERNELS=(
     "durbin"
 )
 
-echo "kernel,baseline,statik_1t,statik_2t,statik_4t,statik_8t,gcc_auto" > ../results/results.csv
+echo "kernel,baseline,paralyze_1t,paralyze_2t,paralyze_4t,paralyze_8t,gcc_auto" > ../results/results.csv
 
 for kernel in "${KERNELS[@]}"; do
     echo "Running $kernel..."

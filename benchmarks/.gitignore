@@ -1,6 +1,6 @@
 *.o
 *_baseline
-*_statik
+*_paralyze
 *_gcc_auto
 *_openmp.c
 

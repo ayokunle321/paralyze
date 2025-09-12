@@ -2,7 +2,7 @@ build/
 cmake-build-*/
 *.o
 *.exe
-statik
+paralyze
 .vscode/
 .DS_Store
 *.log

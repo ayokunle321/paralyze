@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(statik VERSION 1.0.0)
+project(paralyze VERSION 1.0.0)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -19,7 +19,7 @@ include_directories(include)
 
 llvm_map_components_to_libnames(llvm_libs support core)
 
-add_executable(statik
+add_executable(paralyze
     src/main.cpp
     src/ASTVisitor.cpp
     src/LoopVisitor.cpp
@@ -35,7 +35,7 @@ add_executable(statik
     src/ConfidenceScorer.cpp
 )
 
-target_link_libraries(statik
+target_link_libraries(paralyze
     clangAST
     clangBasic
     clangDriver
@@ -45,4 +45,4 @@ target_link_libraries(statik
 )
 
 # Disable unused parameter warnings during development
-target_compile_options(statik PRIVATE -Wall -Wno-unused-parameter)
+target_compile_options(paralyze PRIVATE -Wall -Wno-unused-parameter)
