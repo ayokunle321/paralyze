@@ -96,15 +96,15 @@ void PragmaGenerator::printCleanSummary() const
     return;
   }
 
-  std::cout << "\nGenerated " << generated_pragmas_.size() << " OpenMP pragma";
-  if (generated_pragmas_.size() > 1)
-    std::cout << "s";
-  std::cout << ":\n";
+  // std::cout << "\nGenerated " << generated_pragmas_.size() << " OpenMP pragma";
+  // if (generated_pragmas_.size() > 1)
+  //   std::cout << "s";
+  // std::cout << ":\n";
 
-  for (const auto& pragma : generated_pragmas_)
-  {
-    std::cout << "  Line " << pragma.line_number << ": " << pragma.pragma_text << "\n";
-  }
+  // for (const auto& pragma : generated_pragmas_)
+  // {
+  //   std::cout << "  Line " << pragma.line_number << ": " << pragma.pragma_text << "\n";
+  // }
 }
 
 void PragmaGenerator::printPragmaSummary() const
