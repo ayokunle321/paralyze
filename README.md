@@ -8,15 +8,9 @@ Automatic loop parallelization with transparent static analysis and OpenMP pragm
 
 Automatic parallelization has been a long-standing challenge in compiler optimization. While tools like GCC's `-ftree-parallelize-loops` exist, they tend to be overly conservative and often parallelize almost nothing on real-world code.
 
-After playing around with existing approaches, the goal with **PARALYZE** was to build something more aggressive and transparent. The idea was to push automatic parallelization as far as possible, aiming to surpass GCC’s auto-parallelizer while keeping every decision transparent instead of hiding behind compiler heuristics.
+The goal with **PARALYZE** was to build something more aggressive and transparent. GCC does dependency analysis (loop-carried dependencies, array conflicts, function side effects) but treats it as binary: either 100% provably safe or don't touch it. I tested it on 15 PolyBench kernels and it found very few opportunities.
 
-## What This Does Differently
-
-Does more analysis instead of bailing early:
-
-- **Array access patterns** - tracks if `A[i]` only depends on iteration `i`, even with complex expressions
-- **Confidence scores** - 0-100% instead of binary yes/no. If it's 80% sure, it'll tell you that
-- **Shows reasoning** - explains why each loop can or can't be parallelized
+This tool does the same kind of analyses but uses confidence scoring instead of binary decisions. A loop that's 75% safe gets parallelized, with the score shown so you understand the risk. GCC would reject that same loop. The result: more loops parallelized where it makes sense, and you can actually why instead of being buried under heuristics. The speedups come from being willing to parallelize "pretty safe" loops, not just "perfectly safe" ones.
 
 ## Results
 
