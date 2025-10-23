@@ -12,15 +12,25 @@ The goal with **PARALYZE** was to build something more aggressive and transparen
 
 This tool does the same kind of analyses but uses confidence scoring instead of binary decisions. A loop that's 75% safe gets parallelized, with the score shown so you understand the risk. GCC would reject that same loop. The result: more loops parallelized where it makes sense, and you can actually why instead of being buried under heuristics. The speedups come from being willing to parallelize "pretty safe" loops, not just "perfectly safe" ones.
 
+---
+
 ## Results
 
-Tested on PolyBench linear algebra kernels (4 threads):
+Tested on 15 PolyBench linear algebra kernels (4 threads):
+
+![Analysis Results](docs/images/results_analysis.png)
 
 ![Speedup Comparison](benchmarks/results/speedup_comparison.png)
 
 6 out of 15 got real speedup (>1.5x). Best was 6.45x on triangular solver.
 
-GCC's auto-parallelizer did basically nothing on the same code.
+## Key Insights
+
+- Matrix operations had thread overhead issues, i.e., spawning costs more than the work for small loops.
+
+- GCC's auto-parallelizer bails on pointer uncertainty even when it's safe.
+
+- PolyBench uses macros that turn arrays into pointers. The tool can't see through macros, so some dependencies get missed.
 
 ---
 
@@ -36,6 +46,8 @@ Shows which loops can be parallelized:
 
 ![Analysis Output](docs/images/analysis.png)
 
+---
+
 ### Verbose Mode
 
 ```bash
@@ -45,6 +57,8 @@ Shows which loops can be parallelized:
 Shows detailed dependency analysis:
 
 ![Verbose Analysis](docs/images/analysis_verbose.png)
+
+---
 
 ### Generate OpenMP Code
 
@@ -70,7 +84,7 @@ Add `--verbose` to see the reasoning:
 
 ---
 
-## How It Works
+## Dependency Analysis
 
 Uses Clang to parse C into an AST, then checks each loop for dependencies:
 
@@ -82,54 +96,6 @@ Uses Clang to parse C into an AST, then checks each loop for dependencies:
 Assigns each loop a confidence score (0-100%). Higher = safer to parallelize.
 
 **Only parallelizes outer loops** - inner loops run normally inside each thread. Nested parallelism just adds overhead.
-
----
-
-## Analysis Pipeline
-
-```
-C Source Code
-    ↓
-Clang AST Parser
-    ↓
-Loop Detection & Bounds Analysis
-    ↓
-Dependency Analysis
-    ├─ Scalar Variables
-    ├─ Array Accesses
-    ├─ Pointer Operations
-    └─ Function Calls
-    ↓
-Parallelization Decision (with confidence score)
-    ↓
-OpenMP Pragma Generation
-    ↓
-Annotated Source Code
-```
-
----
-
-## Benchmark Details
-
-15 PolyBench linear algebra kernels, 4 threads:
-
-![Analysis Results](docs/images/results_analysis.png)
-
-Vector operations (dot product, axpy) parallelized well. Triangular solver got 6.45x.
-
-Matrix operations had thread overhead issues - spawning costs more than the work for small loops.
-
-GCC's auto-parallelizer found almost nothing. It bails on pointer uncertainty even when it's safe.
-
----
-
-## Limitations
-
-For small loops, spawning threads costs more than the actual work. Saw this in matrix multiplication benchmarks.
-
-PolyBench uses macros that turn arrays into pointers. Can't see through macros, so some dependencies get missed.
-
-Complex pointer operations get flagged as unsafe even when they're probably fine. Better safe than introducing race conditions though.
 
 ---
 
