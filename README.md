@@ -6,21 +6,27 @@ Automatic loop parallelization with transparent static analysis and OpenMP pragm
 
 ## Motivation
 
-Automatic parallelization has been a long-standing problem in compiler optimization. While tools like GCC's `-ftree-parallelize-loops` exist, they're often too conservative in practice - parallelizing almost nothing on real code.
+Automatic parallelization has been a long-standing challenge in compiler optimization. While tools like GCC's `-ftree-parallelize-loops` exist, they tend to be overly conservative and often parallelize almost nothing on real-world code.
 
-After researching existing approaches, I wanted to build a tool that would be more aggressive while staying transparent about its decisions. The goal was to match or beat GCC's auto-parallelizer and show users exactly why each loop can or can't be parallelized.
+After playing around with existing approaches, the goal with **PARALYZE** was to build something more aggressive and transparent. The idea was to push automatic parallelization as far as possible, aiming to surpass GCC’s auto-parallelizer while keeping every decision transparent instead of hiding behind compiler heuristics.
 
----
+## What This Does Differently
 
-## What It Does
+Does more analysis instead of bailing early:
 
-Analyzes C code to find loops that can safely run in parallel. It checks for:
-- Variable dependencies between loop iterations
-- Array access patterns
-- Pointer operations
-- Function calls with side effects
+- **Array access patterns** - tracks if `A[i]` only depends on iteration `i`, even with complex expressions
+- **Confidence scores** - 0-100% instead of binary yes/no. If it's 80% sure, it'll tell you that
+- **Shows reasoning** - explains why each loop can or can't be parallelized
 
-Then it either shows you an analysis report or generates OpenMP pragmas for you.
+## Results
+
+Tested on PolyBench linear algebra kernels (4 threads):
+
+![Speedup Comparison](benchmarks/results/speedup_comparison.png)
+
+6 out of 15 got real speedup (>1.5x). Best was 6.45x on triangular solver.
+
+GCC's auto-parallelizer did basically nothing on the same code.
 
 ---
 
@@ -70,7 +76,22 @@ Add `--verbose` to see the reasoning:
 
 ---
 
-### Analysis Pipeline
+## How It Works
+
+Uses Clang to parse C into an AST, then checks each loop for dependencies:
+
+**Scalar variables** - if a variable is written in iteration N and read in N+1, that's a dependency  
+**Arrays** - `A[i]` in iteration `i` is safe, `A[i-1]` creates a dependency  
+**Pointers** - complex pointer arithmetic gets flagged as unsafe  
+**Function calls** - math functions are safe, everything else assumed risky
+
+Assigns each loop a confidence score (0-100%). Higher = safer to parallelize.
+
+**Only parallelizes outer loops** - inner loops run normally inside each thread. Nested parallelism just adds overhead.
+
+---
+
+## Analysis Pipeline
 
 ```
 C Source Code
@@ -85,75 +106,36 @@ Dependency Analysis
     ├─ Pointer Operations
     └─ Function Calls
     ↓
-Parallelization Decision
+Parallelization Decision (with confidence score)
     ↓
 OpenMP Pragma Generation
     ↓
 Annotated Source Code
 ```
----
-
-## How It Works
-
-Uses Clang to parse C code into an AST, then analyzes each loop:
-
-**Step 1: Find loop variables**  
-Identifies the loop counter (usually `i`, `j`, etc.) and how it changes each iteration.
-
-**Step 2: Check scalar variables**  
-If a variable is written in one iteration and read in another, the loop can't be parallelized.
-
-**Step 3: Check arrays**  
-Loop accessing `A[i]` in iteration `i` is safe. Loop accessing `A[i-1]` has a dependency problem.
-
-**Step 4: Check pointers**  
-Conservative here - complex pointer stuff gets flagged as unsafe.
-
-**Step 5: Check function calls**  
-Math functions (sin, cos, sqrt) are safe. Everything else is assumed unsafe.
-
-### Key Decisions
-
-**Only parallelize outer loops**  
-When you parallelize an outer loop, the inner loops run normally inside each thread. No point in nested parallelism.
-
-**Conservative by default**  
-Better to miss an opportunity than introduce a race condition.
-
-**Confidence scoring**
-Each pragma gets a confidence score (0-100%) based on loop complexity, dependencies, and access patterns. Higher scores mean safer parallelization.
 
 ---
 
-## Benchmark Results
+## Benchmark Details
 
-Tested on 15 PolyBench linear algebra kernels:
-- **Baseline**: `clang -O3` (single-threaded)
-- **PARALYZE**: `clang -O3 -fopenmp` (4 threads)
-- **GCC Auto**: `gcc-15 -O3 -ftree-parallelize-loops=4`
-
-### Analysis
+15 PolyBench linear algebra kernels, 4 threads:
 
 ![Analysis Results](docs/images/results_analysis.png)
 
-### Speedup
+Vector operations (dot product, axpy) parallelized well. Triangular solver got 6.45x.
 
-![Speedup Comparison](benchmarks/results/speedup_comparison.png)
+Matrix operations had thread overhead issues - spawning costs more than the work for small loops.
 
-**Results:**
-- 6 out of 15 kernels got real speedup (>1.5x)
-- Best case: 6.45x faster on triangular solver
-- Vector operations parallelize well
-- Matrix operations have OpenMP overhead issues
-- GCC auto-parallelization barely did anything
+GCC's auto-parallelizer found almost nothing. It bails on pointer uncertainty even when it's safe.
 
 ---
 
 ## Limitations
 
-- For small loops, the cost of spawning threads can exceed the benefit (saw this in matmul benchmarks)
-- PolyBench uses macros that turn arrays into pointers - the tool can't see through this, so it misses some dependencies
-- Flags complex pointer operations as unsafe even when they might be fine
+For small loops, spawning threads costs more than the actual work. Saw this in matrix multiplication benchmarks.
+
+PolyBench uses macros that turn arrays into pointers. Can't see through macros, so some dependencies get missed.
+
+Complex pointer operations get flagged as unsafe even when they're probably fine. Better safe than introducing race conditions though.
 
 ---
 
@@ -163,7 +145,7 @@ Tested on 15 PolyBench linear algebra kernels:
 - Clang/LLVM 15+
 - CMake 3.15+
 - C++17 compiler
-- gcc-15 (to run benchmarks)
+- gcc-15 (for benchmark comparisons)
 
 ### Build
 
@@ -203,9 +185,10 @@ paralyze/
 
 ## Future Work
 
-- Extend support to C++
-- Better model to predict when parallelization is worth it
+- C++ support (templates, classes)
+- Cost model to predict when thread overhead kills performance
 - Better array dependency analysis
+- Let users tune how aggressive it should be
 
 ---
 
